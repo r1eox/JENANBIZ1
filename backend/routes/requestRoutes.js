@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const archiver = require('archiver');
 const db = require('../database');
 const { authMiddleware } = require('../middleware/authMiddleware');
 const { createNotification, notifyAdmins } = require('../services/notificationService');
@@ -93,6 +94,105 @@ function parseObjectField(value) {
   } catch (error) {
     return {};
   }
+}
+
+function sanitizeArchiveName(value = '') {
+  return String(value || '')
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim() || 'file';
+}
+
+function isZipFile(filePath = '') {
+  return path.extname(String(filePath || '')).toLowerCase() === '.zip';
+}
+
+function toPublicUploadUrl(filePath = '') {
+  const normalizedPath = String(filePath || '').replace(/\\/g, '/');
+  const uploadsIndex = normalizedPath.lastIndexOf('/uploads/');
+  if (uploadsIndex === -1) return null;
+  return `/uploads/${normalizedPath.slice(uploadsIndex + 9)}`;
+}
+
+async function createZipArchive(zipPath, entries) {
+  await new Promise((resolve, reject) => {
+    const output = fs.createWriteStream(zipPath);
+    const archive = archiver('zip', { zlib: { level: 9 } });
+
+    output.on('close', resolve);
+    output.on('error', reject);
+    archive.on('error', reject);
+
+    archive.pipe(output);
+    for (const entry of entries) {
+      archive.file(entry.path, { name: entry.name });
+    }
+    archive.finalize();
+  });
+}
+
+async function collectRequestPackageEntries(requestId) {
+  const [documents, bankStatements, accountStatements, taxDocuments] = await Promise.all([
+    db.prepare('SELECT file_path, file_name, document_name FROM request_documents WHERE request_id = ? AND file_path IS NOT NULL ORDER BY id').all(requestId),
+    db.prepare('SELECT file_path, file_name FROM bank_statements WHERE request_id = ? AND file_path IS NOT NULL ORDER BY uploaded_at').all(requestId),
+    db.prepare('SELECT file_path, file_name FROM account_statements WHERE request_id = ? AND file_path IS NOT NULL ORDER BY uploaded_at').all(requestId),
+    db.prepare('SELECT file_path, file_name FROM tax_documents WHERE request_id = ? AND file_path IS NOT NULL ORDER BY uploaded_at').all(requestId),
+  ]);
+
+  const entries = [];
+  const pushEntries = (items, category) => {
+    for (const item of items) {
+      if (!item.file_path || !fs.existsSync(item.file_path)) continue;
+      entries.push({
+        path: item.file_path,
+        name: `${category}/${sanitizeArchiveName(item.file_name || item.document_name || path.basename(item.file_path))}`,
+      });
+    }
+  };
+
+  pushEntries(documents, 'المستندات');
+  pushEntries(bankStatements, 'الكشوفات البنكية');
+  pushEntries(accountStatements, 'القوائم الحسابية');
+  pushEntries(taxDocuments, 'الوثائق الضريبية');
+
+  return entries;
+}
+
+async function ensureCompletePackage(request) {
+  const packageEntries = await collectRequestPackageEntries(request.id);
+
+  if (packageEntries.length === 0) {
+    if (request.complete_file_path && fs.existsSync(request.complete_file_path)) {
+      return {
+        filePath: request.complete_file_path,
+        fileName: request.complete_file_name || path.basename(request.complete_file_path),
+        created: false,
+      };
+    }
+    return null;
+  }
+
+  if (packageEntries.length === 1 && isZipFile(packageEntries[0].path)) {
+    return {
+      filePath: packageEntries[0].path,
+      fileName: packageEntries[0].name,
+      created: false,
+    };
+  }
+
+  const uploadsDir = path.join(__dirname, '../uploads/complete-files');
+  if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+  const zipName = `request-${request.id}-${Date.now()}.zip`;
+  const zipPath = path.join(uploadsDir, zipName);
+  await createZipArchive(zipPath, packageEntries);
+
+  return {
+    filePath: zipPath,
+    fileName: zipName,
+    created: true,
+    entryCount: packageEntries.length,
+  };
 }
 
 function normalizeApplicantCategory(value = '') {
@@ -1095,15 +1195,20 @@ router.post('/:id/submit-file', authMiddleware, completeUpload.single('file'), a
     const request = await db.prepare('SELECT * FROM requests WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
     if (!request) return res.status(404).json({ error: 'الطلب غير موجود' });
 
-    const filePath = req.file ? req.file.path : request.complete_file_path || null;
-    const fileName = req.file ? decodeUploadedFileName(req.file.originalname) : request.complete_file_name || null;
-    const submissionNote = req.file ? 'تم رفع الملف الكامل من الموظف' : 'تم إرسال المستندات المرفوعة من الموظف';
-    const notificationTitle = req.file
-      ? `تم رفع الملف الكامل لطلب ${request.company_name}`
-      : `تم إرسال مستندات طلب ${request.company_name}`;
-    const notificationBody = req.file
-      ? `${req.user.name} رفع الملف الكامل بانتظار مراجعة الإدارة.`
-      : `${req.user.name} أرسل المستندات والكشوفات المرفوعة بانتظار مراجعة الإدارة.`;
+    const packageInfo = await ensureCompletePackage(request);
+    const uploadedFilePath = req.file ? req.file.path : null;
+    const uploadedFileName = req.file ? decodeUploadedFileName(req.file.originalname) : null;
+    const finalFilePath = packageInfo?.filePath || uploadedFilePath || request.complete_file_path || null;
+    const finalFileName = packageInfo?.fileName || uploadedFileName || request.complete_file_name || null;
+    const submissionNote = packageInfo?.created
+      ? `تم إنشاء ملف مضغوط يحتوي على ${packageInfo.entryCount || 0} مرفق`
+      : (req.file ? 'تم رفع الملف الكامل من الموظف' : 'تم إرسال المستندات المرفوعة من الموظف');
+    const notificationTitle = packageInfo?.created
+      ? `تم تجهيز ملف مضغوط لطلب ${request.company_name}`
+      : (req.file ? `تم رفع الملف الكامل لطلب ${request.company_name}` : `تم إرسال مستندات طلب ${request.company_name}`);
+    const notificationBody = packageInfo?.created
+      ? `${req.user.name} جهز ملفاً مضغوطاً بانتظار مراجعة الإدارة.`
+      : (req.file ? `${req.user.name} رفع الملف الكامل بانتظار مراجعة الإدارة.` : `${req.user.name} أرسل المستندات والكشوفات المرفوعة بانتظار مراجعة الإدارة.`);
 
     await db.prepare(`
       UPDATE requests SET
@@ -1112,7 +1217,7 @@ router.post('/:id/submit-file', authMiddleware, completeUpload.single('file'), a
         complete_file_name = ?,
         updated_at = NOW()
       WHERE id = ?
-    `).run(filePath, fileName, req.params.id);
+    `).run(finalFilePath, finalFileName, req.params.id);
 
     await db.prepare('INSERT INTO status_history (request_id, status, note, created_by) VALUES (?, ?, ?, ?)').run(
       req.params.id, 'file_submitted', submissionNote, req.user.id
@@ -1125,7 +1230,13 @@ router.post('/:id/submit-file', authMiddleware, completeUpload.single('file'), a
       link: `/requests?view=${request.id}`,
     }, { excludeUserId: req.user.id });
 
-    res.json({ message: req.file ? 'تم إرسال الملف للمدير بنجاح. سيتم مراجعته قريباً.' : 'تم إرسال الطلب بمرفقاته الحالية للمدير بنجاح.' });
+    res.json({
+      message: packageInfo?.created
+        ? 'تم تجميع المستندات في ملف مضغوط وإرساله بنجاح.'
+        : (req.file ? 'تم إرسال الملف للمدير بنجاح. سيتم مراجعته قريباً.' : 'تم إرسال الطلب بمرفقاته الحالية للمدير بنجاح.'),
+      package_url: toPublicUploadUrl(finalFilePath),
+      package_name: finalFileName,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'خطأ في إرسال الملف' });

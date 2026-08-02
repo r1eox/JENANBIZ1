@@ -80,11 +80,13 @@ async function initDatabase() {
     phone TEXT,
     last_seen_at TIMESTAMP,
     last_presence_notification_at TIMESTAMP,
+    revoked_permissions TEXT DEFAULT '[]',
     created_at TIMESTAMP DEFAULT NOW()
   )`);
 
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_presence_notification_at TIMESTAMP`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS revoked_permissions TEXT DEFAULT '[]'`);
 
   await pool.query(`CREATE TABLE IF NOT EXISTS permissions (
     id SERIAL PRIMARY KEY,

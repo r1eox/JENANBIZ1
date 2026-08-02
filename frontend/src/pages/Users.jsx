@@ -36,7 +36,6 @@ export default function Users() {
   const [selectedPermissions, setSelectedPermissions] = useState([]);
   const [loadingPermissions, setLoadingPermissions] = useState(false);
   const [savingPermissions, setSavingPermissions] = useState(false);
-  const [permissionsAreAutoManaged, setPermissionsAreAutoManaged] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -158,7 +157,6 @@ export default function Users() {
     }
     setPermissionOptions(Array.isArray(data.all_permissions) ? data.all_permissions : []);
     setSelectedPermissions(Array.isArray(data.user_permissions) ? data.user_permissions : []);
-    setPermissionsAreAutoManaged(Boolean(data.is_admin));
     setLoadingPermissions(false);
   };
 
@@ -169,7 +167,7 @@ export default function Users() {
   };
 
   const savePermissions = async () => {
-    if (!permissionUser || permissionsAreAutoManaged) {
+    if (!permissionUser) {
       setPermissionUser(null);
       return;
     }
@@ -194,7 +192,7 @@ export default function Users() {
     setPermissionUser(null);
   };
 
-  const visibleSelectableIds = canManageUsers ? filtered.filter(user => user.role !== 'admin').map(user => user.id) : [];
+  const visibleSelectableIds = canManageUsers ? filtered.map(user => user.id) : [];
   const allVisibleSelected = visibleSelectableIds.length > 0 && visibleSelectableIds.every(id => selectedIds.includes(id));
 
   const toggleSelectAllVisible = () => {
@@ -657,9 +655,7 @@ export default function Users() {
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
                 <div className="font-bold text-slate-900">صلاحيات الدور الأساسية</div>
                 <div className="mt-1 text-xs text-slate-500">
-                  {permissionsAreAutoManaged
-                    ? 'هذا المستخدم مدير، لذلك يملك جميع الصلاحيات تلقائياً ولا يمكن تعديلها من هنا.'
-                    : 'لا توجد صلاحيات تلقائية مرتبطة بالدور حالياً، وجميع الصلاحيات أدناه تُمنح يدويًا.'}
+                  'يمكنك منح أو سحب أي صلاحية هنا، بما في ذلك حسابات المدير.'
                 </div>
               </div>
 
@@ -676,7 +672,6 @@ export default function Users() {
                         <input
                           type="checkbox"
                           checked={checked}
-                          disabled={permissionsAreAutoManaged}
                           onChange={() => togglePermission(permission.key)}
                           className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                         />
@@ -702,7 +697,7 @@ export default function Users() {
                 disabled={loadingPermissions || savingPermissions}
                 className="flex-1 rounded-xl bg-blue-600 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
               >
-                {permissionsAreAutoManaged ? 'إغلاق' : savingPermissions ? 'جارٍ الحفظ...' : 'حفظ الصلاحيات'}
+                {savingPermissions ? 'جارٍ الحفظ...' : 'حفظ الصلاحيات'}
               </button>
               <button
                 type="button"
@@ -723,7 +718,7 @@ function UserRow({ user, onStatus, onDelete, onEdit, onPermissions, isSelected, 
   return (
     <div className="flex items-center justify-between px-5 py-4 bg-white hover:bg-gray-50 transition-colors">
       <div className="flex items-center gap-3">
-        {canManageUsers && user.role !== 'admin' && (
+        {canManageUsers && (
           <input
             type="checkbox"
             checked={isSelected}
@@ -774,7 +769,7 @@ function UserRow({ user, onStatus, onDelete, onEdit, onPermissions, isSelected, 
             <UserCheck size={14} />
           </button>
         )}
-        {canManageUserPermissions && user.role !== 'admin' && (
+        {canManageUserPermissions && (
           <button
             onClick={() => onPermissions(user)}
             className="p-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors"
@@ -783,7 +778,7 @@ function UserRow({ user, onStatus, onDelete, onEdit, onPermissions, isSelected, 
             <Shield size={14} />
           </button>
         )}
-        {canManageUsers && user.role !== 'admin' && (
+        {canManageUsers && (
           <button
             onClick={() => onEdit(user)}
             className="p-1.5 bg-amber-50 text-amber-600 rounded-lg hover:bg-amber-100 transition-colors"
@@ -792,7 +787,7 @@ function UserRow({ user, onStatus, onDelete, onEdit, onPermissions, isSelected, 
             <Edit2 size={14} />
           </button>
         )}
-        {canManageUsers && user.role !== 'admin' && (
+        {canManageUsers && (
           <button
             onClick={() => onDelete(user.id, user.name)}
             className="p-1.5 bg-gray-100 text-gray-500 rounded-lg hover:bg-red-100 hover:text-red-600 transition-colors"

@@ -2,7 +2,27 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Plus, Trash2, Search, X, Edit2, Phone, Building2, Users } from 'lucide-react';
 
-const PRODUCT_TYPES = ['كاش', 'نقاط بيع', 'عقار', 'تمويل شخصي', 'أسطول', 'رهن', 'تمويل تجاري'];
+const FALLBACK_PRODUCT_TYPES = ['كاش', 'نقاط بيع', 'عقار', 'تمويل شخصي', 'أسطول', 'رهن', 'تمويل تجاري'];
+const PRODUCT_FIELD_SETS = {
+  'كاش': ['annual_deposit_amount', 'min_months', 'whatsapp_number'],
+  'نقاط بيع': ['annual_deposit_amount', 'min_months', 'whatsapp_number'],
+  'تمويل تجاري': ['annual_deposit_amount', 'min_transfer_amount', 'min_months', 'whatsapp_number'],
+  'تمويل شخصي': ['min_transfer_amount', 'min_months', 'whatsapp_number'],
+  'عقار': ['min_transfer_amount', 'min_months', 'whatsapp_number'],
+  'رهن': ['min_transfer_amount', 'min_months', 'whatsapp_number'],
+  'أسطول': ['min_transfer_amount', 'min_months', 'whatsapp_number'],
+};
+
+const DEFAULT_VISIBLE_FIELDS = ['annual_deposit_amount', 'min_transfer_amount', 'min_months', 'whatsapp_number'];
+
+const FIELD_META = {
+  annual_deposit_amount: { label: 'الإيداعات السنوية', helper: 'بديل موحد لحقول أدنى إيداع ونقاط البيع' },
+  min_transfer_amount: { label: 'الحد الأدنى للتحويل', helper: 'يُعرض فقط للأنواع التي تحتاج شرط تحويل' },
+  min_months: { label: 'عدد الأشهر', helper: 'مدة كشف الحساب أو النشاط' },
+  whatsapp_number: { label: 'رقم واتساب', helper: 'رقم الجهة التمويلية' },
+};
+
+const getAnnualDepositAmount = (entity) => Number(entity.annual_deposit_amount ?? entity.min_deposit_transfer_amount ?? entity.min_deposit_amount ?? entity.min_pos_amount ?? 0);
 
 export default function Companies() {
   const { authFetch } = useAuth();
@@ -12,6 +32,8 @@ export default function Companies() {
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [productTypes, setProductTypes] = useState(FALLBACK_PRODUCT_TYPES);
+  const [newProductType, setNewProductType] = useState('');
 
   // Modals
   const [showEntityModal, setShowEntityModal] = useState(false);
@@ -20,7 +42,7 @@ export default function Companies() {
   const [editContact, setEditContact] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const defaultEntityForm = { name: '', priority: 0, min_pos_amount: 0, min_deposit_amount: 0, min_transfer_amount: 0, min_months: 6, whatsapp_number: '', product_types: [], notes: '' };
+  const defaultEntityForm = { name: '', priority: 0, annual_deposit_amount: 0, min_transfer_amount: 0, min_months: 6, whatsapp_number: '', product_types: [], notes: '' };
   const defaultContactForm = { funding_entity_id: '', name: '', phone: '', product_types: [], notes: '' };
   const [entityForm, setEntityForm] = useState(defaultEntityForm);
   const [contactForm, setContactForm] = useState(defaultContactForm);
@@ -28,18 +50,34 @@ export default function Companies() {
   const loadEntities = async () => {
     const res = await authFetch('/api/admin/funding-entities');
     const data = res.ok ? await res.json() : [];
-    setEntities(Array.isArray(data) ? data : []);
+    const normalized = Array.isArray(data) ? data : [];
+    setEntities(normalized);
     setSelectedEntityIds([]);
+    return normalized;
   };
   const loadContacts = async () => {
     const res = await authFetch('/api/companies/contacts');
     const data = res.ok ? await res.json() : [];
-    setContacts(Array.isArray(data) ? data : []);
+    const normalized = Array.isArray(data) ? data : [];
+    setContacts(normalized);
+    return normalized;
+  };
+
+  const loadProductTypes = async () => {
+    const res = await authFetch('/api/companies/product-types');
+    const data = res.ok ? await res.json() : [];
+    return Array.isArray(data) && data.length > 0 ? data : FALLBACK_PRODUCT_TYPES;
   };
 
   const load = async () => {
     setLoading(true);
-    await Promise.all([loadEntities(), loadContacts()]);
+    const [loadedEntities, loadedContacts, loadedProductTypes] = await Promise.all([loadEntities(), loadContacts(), loadProductTypes()]);
+    const dynamicTypes = [
+      ...loadedProductTypes,
+      ...loadedEntities.flatMap(entity => Array.isArray(entity.product_types) ? entity.product_types : []),
+      ...loadedContacts.flatMap(contact => Array.isArray(contact.product_types) ? contact.product_types : []),
+    ].map(type => String(type || '').trim()).filter(Boolean);
+    setProductTypes(Array.from(new Set(dynamicTypes)));
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
@@ -48,14 +86,29 @@ export default function Companies() {
   const openNewEntity = () => { setEditEntity(null); setEntityForm(defaultEntityForm); setShowEntityModal(true); };
   const openEditEntity = (e) => {
     setEditEntity(e);
-    setEntityForm({ name: e.name, priority: e.priority, min_pos_amount: e.min_pos_amount, min_deposit_amount: e.min_deposit_amount, min_transfer_amount: e.min_transfer_amount, min_months: e.min_months, whatsapp_number: e.whatsapp_number || '', product_types: Array.isArray(e.product_types) ? e.product_types : [], notes: e.notes || '' });
+    setEntityForm({
+      name: e.name,
+      priority: e.priority,
+      annual_deposit_amount: e.annual_deposit_amount ?? e.min_deposit_transfer_amount ?? e.min_deposit_amount ?? e.min_pos_amount ?? 0,
+      min_transfer_amount: e.min_transfer_amount,
+      min_months: e.min_months,
+      whatsapp_number: e.whatsapp_number || '',
+      product_types: Array.isArray(e.product_types) ? e.product_types : [],
+      notes: e.notes || ''
+    });
     setShowEntityModal(true);
   };
   const saveEntity = async (ev) => {
-    ev.preventDefault(); setSubmitting(true);
+    ev.preventDefault();
+    if (!entityForm.product_types[0]) {
+      alert('اختر النوع الأساسي للتمويل أولاً');
+      return;
+    }
+    setSubmitting(true);
     const url = editEntity ? `/api/admin/funding-entities/${editEntity.id}` : '/api/admin/funding-entities';
     const method = editEntity ? 'PUT' : 'POST';
-    const res = await authFetch(url, { method, body: JSON.stringify(entityForm) });
+    const payload = { ...entityForm, product_types: [entityForm.product_types[0]] };
+    const res = await authFetch(url, { method, body: JSON.stringify(payload) });
     const d = await res.json();
     if (!res.ok) alert(d.error || 'خطأ');
     else { setShowEntityModal(false); loadEntities(); }
@@ -103,10 +156,20 @@ export default function Companies() {
     }));
   };
 
+  const addProductTypeOption = () => {
+    const value = String(newProductType || '').trim();
+    if (!value) return;
+    setProductTypes(current => current.includes(value) ? current : [...current, value]);
+    setEntityForm(form => ({ ...form, product_types: [value] }));
+    setNewProductType('');
+  };
+
   const filteredEntities = entities.filter(e => e.name?.toLowerCase().includes(search.toLowerCase()));
   const filteredContacts = contacts.filter(c => c.name?.toLowerCase().includes(search.toLowerCase()) || c.entity_name?.toLowerCase().includes(search.toLowerCase()));
   const visibleEntityIds = filteredEntities.map(entity => entity.id);
   const allVisibleEntitiesSelected = visibleEntityIds.length > 0 && visibleEntityIds.every(id => selectedEntityIds.includes(id));
+  const activeProductType = entityForm.product_types[0] || '';
+  const visibleFields = PRODUCT_FIELD_SETS[activeProductType] || DEFAULT_VISIBLE_FIELDS;
 
   const toggleSelectAllEntities = () => {
     if (allVisibleEntitiesSelected) {
@@ -211,7 +274,7 @@ export default function Companies() {
                         {e.product_types?.length > 0 && ` ${e.product_types.slice(0,3).join('، ')}${e.product_types.length > 3 ? '...' : ''}`}
                       </div>
                       <div className="text-xs text-gray-400">
-                        نقاط بيع: {e.min_pos_amount?.toLocaleString()} · إيداع: {e.min_deposit_amount?.toLocaleString()} ريال
+                        الإيداعات السنوية: {getAnnualDepositAmount(e).toLocaleString()} ريال
                       </div>
                     </div>
                   </div>
@@ -278,30 +341,57 @@ export default function Companies() {
                     className="w-full border border-gray-200 rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">رقم واتساب</label>
-                  <input value={entityForm.whatsapp_number} onChange={e => setEntityForm({ ...entityForm, whatsapp_number: e.target.value })}
-                    className="w-full border border-gray-200 rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="05xxxxxxxx" />
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">النوع الأساسي</label>
+                  <select
+                    value={activeProductType}
+                    onChange={e => setEntityForm(form => ({ ...form, product_types: e.target.value ? [e.target.value] : [] }))}
+                    className="w-full border border-gray-200 rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  >
+                    <option value="">اختر النوع</option>
+                    {productTypes.map(type => <option key={type} value={type}>{type}</option>)}
+                  </select>
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-3">
-                {[['min_pos_amount', 'أدنى نقاط بيع'], ['min_deposit_amount', 'أدنى إيداع'], ['min_transfer_amount', 'أدنى تحويل']].map(([key, label]) => (
-                  <div key={key}>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">{label}</label>
-                    <input type="number" value={entityForm[key]} onChange={e => setEntityForm({ ...entityForm, [key]: Number(e.target.value) })}
-                      className="w-full border border-gray-200 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                ))}
+              <div className="flex gap-2">
+                <input
+                  value={newProductType}
+                  onChange={e => setNewProductType(e.target.value)}
+                  placeholder="إضافة نوع تمويلي جديد"
+                  className="flex-1 border border-gray-200 rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={addProductTypeOption}
+                  className="px-4 rounded-xl border border-blue-200 text-blue-700 text-sm font-bold hover:bg-blue-50"
+                >
+                  إضافة
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {visibleFields.map((fieldKey) => {
+                  const meta = FIELD_META[fieldKey];
+                  if (!meta) return null;
+                  return (
+                    <div key={fieldKey}>
+                      <label className="block text-xs font-semibold text-gray-700 mb-1">{meta.label}</label>
+                      <input
+                        type="number"
+                        value={entityForm[fieldKey]}
+                        onChange={e => setEntityForm({ ...entityForm, [fieldKey]: Number(e.target.value) })}
+                        className="w-full border border-gray-200 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <p className="mt-1 text-[11px] text-gray-400">{meta.helper}</p>
+                    </div>
+                  );
+                })}
               </div>
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">المنتجات</label>
-                <div className="flex flex-wrap gap-2">
-                  {PRODUCT_TYPES.map(t => (
-                    <button key={t} type="button" onClick={() => toggleProductType(t, entityForm, setEntityForm)}
-                      className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${entityForm.product_types.includes(t) ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-                      {t}
-                    </button>
-                  ))}
-                </div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">رقم واتساب</label>
+                <input value={entityForm.whatsapp_number} onChange={e => setEntityForm({ ...entityForm, whatsapp_number: e.target.value })}
+                  className="w-full border border-gray-200 rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="05xxxxxxxx" />
+              </div>
+              <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+                إظهار الحقول يتم تلقائياً حسب النوع الأساسي المختار، وباقي الحقول تختفي.
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">ملاحظات</label>
@@ -351,7 +441,7 @@ export default function Companies() {
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">المنتجات</label>
                 <div className="flex flex-wrap gap-2">
-                  {PRODUCT_TYPES.map(t => (
+                  {productTypes.map(t => (
                     <button key={t} type="button" onClick={() => toggleProductType(t, contactForm, setContactForm)}
                       className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${contactForm.product_types.includes(t) ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
                       {t}

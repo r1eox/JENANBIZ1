@@ -1213,7 +1213,14 @@ export default function Requests() {
     const res = await authFetch(`/api/admin/requests/${sendReq.id}/assign-funding`, { method: 'POST', body: JSON.stringify(sendForm) });
     const d = await res.json();
     if (!res.ok) alert(d.error || 'خطأ');
-    else { alert(d.message); setSendReq(null); load(); }
+    else {
+      alert(d.message);
+      if (d.whatsapp_url) {
+        window.open(d.whatsapp_url, '_blank', 'noopener,noreferrer');
+      }
+      setSendReq(null);
+      load();
+    }
     setSubmittingSend(false);
   };
 

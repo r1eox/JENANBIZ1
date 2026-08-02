@@ -8,6 +8,17 @@ const router = express.Router();
 
 const usersAccessMiddleware = hasAnyPermission(['manage_users', 'approve_users', 'manage_user_permissions']);
 
+function parseJsonArray(value) {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
 function parseObjectField(value) {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value;
   if (!value) return {};
@@ -80,8 +91,10 @@ router.put('/users/:id', hasPermission('manage_users'), async (req, res) => {
     const { name, email, role, phone, partner_type } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'الاسم مطلوب' });
     if (!email || !email.trim()) return res.status(400).json({ error: 'البريد مطلوب' });
-    if (user.role === 'admin' && role && role !== 'admin') return res.status(403).json({ error: 'لا يمكن تغيير دور الأدمن' });
     if (role === 'admin' && req.user.role !== 'admin') return res.status(403).json({ error: 'تعيين دور المدير متاح للمدير فقط' });
+    if (Number(req.params.id) === Number(req.user.id) && role && role !== user.role) {
+      return res.status(403).json({ error: 'لا يمكنك تغيير دور حسابك الحالي من هنا' });
+    }
     const dup = await db.prepare('SELECT id FROM users WHERE email = ? AND id != ?').get(email.trim().toLowerCase(), req.params.id);
     if (dup) return res.status(400).json({ error: 'البريد الإلكتروني مستخدم مسبقاً' });
     await db.prepare('UPDATE users SET name = ?, email = ?, role = ?, phone = ?, partner_type = ? WHERE id = ?')
@@ -135,7 +148,13 @@ router.delete('/users/:id', hasPermission('manage_users'), async (req, res) => {
   try {
     const user = await db.prepare('SELECT role FROM users WHERE id = ?').get(req.params.id);
     if (!user) return res.status(404).json({ error: 'المستخدم غير موجود' });
-    if (user.role === 'admin') return res.status(403).json({ error: 'لا يمكن حذف الأدمن' });
+    if (Number(req.params.id) === Number(req.user.id)) return res.status(403).json({ error: 'لا يمكنك حذف حسابك الحالي' });
+    if (user.role === 'admin') {
+      const adminCountRow = await db.prepare('SELECT COUNT(*) as count FROM users WHERE role = \'admin\'').get();
+      if (Number(adminCountRow?.count || 0) <= 1) {
+        return res.status(403).json({ error: 'يجب إبقاء مدير واحد على الأقل في النظام' });
+      }
+    }
     await db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
     res.json({ message: 'تم حذف المستخدم' });
   } catch (err) {
@@ -152,8 +171,13 @@ router.post('/users/bulk-delete', hasPermission('manage_users'), async (req, res
     let deletedCount = 0;
 
     for (const id of ids) {
+      if (Number(id) === Number(req.user.id)) continue;
       const user = await db.prepare('SELECT role FROM users WHERE id = ?').get(id);
-      if (!user || user.role === 'admin') continue;
+      if (!user) continue;
+      if (user.role === 'admin') {
+        const adminCountRow = await db.prepare('SELECT COUNT(*) as count FROM users WHERE role = \'admin\'').get();
+        if (Number(adminCountRow?.count || 0) <= 1) continue;
+      }
       await db.prepare('DELETE FROM users WHERE id = ?').run(id);
       deletedCount += 1;
     }
@@ -454,8 +478,8 @@ router.post('/requests/:id/assign-funding', hasPermission('send_to_funding'), as
     const { funding_entity_id, contact_id, note } = req.body;
     if (!funding_entity_id) return res.status(400).json({ error: 'الجهة التمويلية مطلوبة' });
     const [request, entity] = await Promise.all([
-      db.prepare('SELECT id, user_id, company_name FROM requests WHERE id = ?').get(req.params.id),
-      db.prepare('SELECT id, name FROM funding_entities WHERE id = ?').get(funding_entity_id),
+      db.prepare('SELECT id, user_id, company_name, complete_file_path, complete_file_name FROM requests WHERE id = ?').get(req.params.id),
+      db.prepare('SELECT id, name, whatsapp_number FROM funding_entities WHERE id = ?').get(funding_entity_id),
     ]);
     if (!request) return res.status(404).json({ error: 'الطلب غير موجود' });
     if (!entity) return res.status(404).json({ error: 'الجهة التمويلية غير موجودة' });
@@ -475,7 +499,20 @@ router.post('/requests/:id/assign-funding', hasPermission('send_to_funding'), as
       body: historyNote,
       link: `/requests?view=${request.id}`,
     });
-    res.json({ message: `تم إرسال الطلب إلى ${entity.name}` });
+
+    const packageUrl = request.complete_file_path
+      ? `${req.protocol}://${req.get('host')}/uploads/${request.complete_file_path.replace(/\\/g, '/').split('/uploads/').pop()}`
+      : null;
+    const whatsappNumber = String(entity.whatsapp_number || '').replace(/\D/g, '');
+    const whatsappUrl = whatsappNumber
+      ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent([`مرحباً، تم إرسال طلب ${request.company_name} إليكم.`, packageUrl ? `رابط الملف المضغوط: ${packageUrl}` : null, note || null].filter(Boolean).join('\n'))}`
+      : null;
+
+    res.json({
+      message: `تم إرسال الطلب إلى ${entity.name}`,
+      whatsapp_url: whatsappUrl,
+      package_url: packageUrl,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'خطأ في الإرسال: ' + err.message });
@@ -488,6 +525,7 @@ router.get('/funding-entities', hasAnyPermission(['manage_funding', 'send_to_fun
     const entities = await db.prepare('SELECT * FROM funding_entities ORDER BY priority DESC').all();
     res.json(entities.map(e => ({
       ...e,
+      annual_deposit_amount: Number(e.min_deposit_transfer_amount || 0),
       product_types: JSON.parse(e.product_types || '[]'),
       required_documents: JSON.parse(e.required_documents || '[]'),
       additional_whatsapp_numbers: JSON.parse(e.additional_whatsapp_numbers || '[]')
@@ -501,15 +539,16 @@ router.get('/funding-entities', hasAnyPermission(['manage_funding', 'send_to_fun
 router.post('/funding-entities', hasPermission('manage_funding'), async (req, res) => {
   try {
     const { name, priority, min_pos_amount, min_deposit_amount, min_transfer_amount, min_months,
-      required_documents, notes, whatsapp_number, additional_whatsapp_numbers, product_types } = req.body;
+      annual_deposit_amount, required_documents, notes, whatsapp_number, additional_whatsapp_numbers, product_types } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'اسم الجهة مطلوب' });
+    const normalizedAnnualDeposit = annual_deposit_amount ?? min_deposit_amount ?? min_pos_amount ?? 0;
     const result = await db.prepare(`
       INSERT INTO funding_entities (name, priority, min_pos_amount, min_deposit_amount, min_transfer_amount,
-        min_months, required_documents, notes, whatsapp_number, additional_whatsapp_numbers, product_types)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        min_months, required_documents, notes, whatsapp_number, additional_whatsapp_numbers, product_types, min_deposit_transfer_amount)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(name.trim(), priority || 0, min_pos_amount || 0, min_deposit_amount || 0, min_transfer_amount || 0,
       min_months || 6, JSON.stringify(required_documents || []), notes || '', whatsapp_number || '',
-      JSON.stringify(additional_whatsapp_numbers || []), JSON.stringify(product_types || []));
+      JSON.stringify(additional_whatsapp_numbers || []), JSON.stringify(product_types || []), normalizedAnnualDeposit || 0);
     res.status(201).json({ id: result.lastInsertRowid, message: 'تمت إضافة الجهة التمويلية' });
   } catch (err) {
     console.error(err);
@@ -522,10 +561,11 @@ router.put('/funding-entities/:id', hasPermission('manage_funding'), async (req,
     const entity = await db.prepare('SELECT * FROM funding_entities WHERE id = ?').get(req.params.id);
     if (!entity) return res.status(404).json({ error: 'الجهة غير موجودة' });
     const { name, priority, min_pos_amount, min_deposit_amount, min_transfer_amount, min_months,
-      required_documents, notes, whatsapp_number, additional_whatsapp_numbers, product_types, is_active } = req.body;
+      annual_deposit_amount, required_documents, notes, whatsapp_number, additional_whatsapp_numbers, product_types, is_active } = req.body;
+    const normalizedAnnualDeposit = annual_deposit_amount ?? min_deposit_amount ?? min_pos_amount ?? entity.min_deposit_transfer_amount ?? 0;
     await db.prepare(`UPDATE funding_entities SET name=?, priority=?, min_pos_amount=?, min_deposit_amount=?,
       min_transfer_amount=?, min_months=?, required_documents=?, notes=?, whatsapp_number=?,
-      additional_whatsapp_numbers=?, product_types=?, is_active=?, updated_at=NOW() WHERE id=?`
+      additional_whatsapp_numbers=?, product_types=?, min_deposit_transfer_amount=?, is_active=?, updated_at=NOW() WHERE id=?`
     ).run(name ?? entity.name, priority ?? entity.priority,
       min_pos_amount ?? entity.min_pos_amount, min_deposit_amount ?? entity.min_deposit_amount,
       min_transfer_amount ?? entity.min_transfer_amount, min_months ?? entity.min_months,
@@ -533,6 +573,7 @@ router.put('/funding-entities/:id', hasPermission('manage_funding'), async (req,
       notes ?? entity.notes, whatsapp_number ?? entity.whatsapp_number,
       additional_whatsapp_numbers ? JSON.stringify(additional_whatsapp_numbers) : entity.additional_whatsapp_numbers,
       product_types ? JSON.stringify(product_types) : entity.product_types,
+      normalizedAnnualDeposit,
       is_active !== undefined ? (is_active ? 1 : 0) : entity.is_active, req.params.id);
     res.json({ message: 'تم تحديث الجهة التمويلية' });
   } catch (err) {
@@ -745,14 +786,18 @@ router.delete('/permissions/:key', adminMiddleware, async (req, res) => {
 
 router.get('/users/:id/permissions', hasPermission('manage_user_permissions'), async (req, res) => {
   try {
-    const user = await db.prepare('SELECT id, name, role FROM users WHERE id = ?').get(req.params.id);
+    const user = await db.prepare('SELECT id, name, role, revoked_permissions FROM users WHERE id = ?').get(req.params.id);
     if (!user) return res.status(404).json({ error: 'المستخدم غير موجود' });
     const [allPermissions, userPerms] = await Promise.all([
       db.prepare('SELECT * FROM permissions ORDER BY category, label').all(),
       db.prepare('SELECT permission_key FROM user_permissions WHERE user_id = ?').all(req.params.id),
     ]);
     const userPermKeys = userPerms.map(p => p.permission_key);
-    res.json({ user, all_permissions: allPermissions, user_permissions: userPermKeys, is_admin: user.role === 'admin' });
+    const revokedPermissions = parseJsonArray(user.revoked_permissions);
+    const effectivePermissions = user.role === 'admin'
+      ? allPermissions.map(permission => permission.key).filter((key) => !revokedPermissions.includes(key))
+      : userPermKeys;
+    res.json({ user, all_permissions: allPermissions, user_permissions: effectivePermissions, is_admin: user.role === 'admin', revoked_permissions: revokedPermissions });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'خطأ في استرجاع الصلاحيات' });
@@ -765,10 +810,17 @@ router.put('/users/:id/permissions', hasPermission('manage_user_permissions'), a
     if (!Array.isArray(permissions)) return res.status(400).json({ error: 'قائمة صلاحيات غير صالحة' });
     const user = await db.prepare('SELECT role FROM users WHERE id = ?').get(req.params.id);
     if (!user) return res.status(404).json({ error: 'المستخدم غير موجود' });
-    if (user.role === 'admin') return res.status(400).json({ error: 'الأدمن يملك جميع الصلاحيات تلقائياً' });
-    await db.prepare('DELETE FROM user_permissions WHERE user_id = ?').run(req.params.id);
-    for (const key of permissions) {
-      await db.prepare('INSERT INTO user_permissions (user_id, permission_key, granted_by) VALUES (?,?,?)').run(req.params.id, key, req.user.id);
+    if (user.role === 'admin') {
+      const allPermissions = await db.prepare('SELECT key FROM permissions').all();
+      const allKeys = allPermissions.map(permission => permission.key);
+      const revokedPermissions = allKeys.filter((key) => !permissions.includes(key));
+      await db.prepare('UPDATE users SET revoked_permissions = ? WHERE id = ?').run(JSON.stringify(revokedPermissions), req.params.id);
+    } else {
+      await db.prepare('DELETE FROM user_permissions WHERE user_id = ?').run(req.params.id);
+      for (const key of permissions) {
+        await db.prepare('INSERT INTO user_permissions (user_id, permission_key, granted_by) VALUES (?,?,?)').run(req.params.id, key, req.user.id);
+      }
+      await db.prepare('UPDATE users SET revoked_permissions = ? WHERE id = ?').run('[]', req.params.id);
     }
     res.json({ message: 'تم تحديث صلاحيات المستخدم' });
   } catch (err) {
@@ -779,6 +831,18 @@ router.put('/users/:id/permissions', hasPermission('manage_user_permissions'), a
 
 router.get('/users/:id/permissions-summary', hasPermission('manage_user_permissions'), async (req, res) => {
   try {
+    const user = await db.prepare('SELECT id, role, revoked_permissions FROM users WHERE id = ?').get(req.params.id);
+    if (!user) return res.status(404).json({ error: 'المستخدم غير موجود' });
+    const allPermissions = await db.prepare('SELECT key, label, category FROM permissions ORDER BY category, label').all();
+    if (user.role === 'admin') {
+      const revokedPermissions = parseJsonArray(user.revoked_permissions);
+      res.json(allPermissions.map((permission) => ({
+        ...permission,
+        is_revoked: revokedPermissions.includes(permission.key),
+      })));
+      return;
+    }
+
     const perms = await db.prepare(`
       SELECT p.key, p.label, p.category, up.granted_at
       FROM user_permissions up JOIN permissions p ON up.permission_key=p.key

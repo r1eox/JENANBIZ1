@@ -12,7 +12,7 @@ const authMiddleware = async (req, res, next) => {
   try {
     if (!jwtSecret) return res.status(500).json({ error: 'إعدادات المصادقة غير مكتملة' });
     const decoded = jwt.verify(token, jwtSecret);
-    const user = await db.prepare('SELECT id, name, email, role, status, phone FROM users WHERE id = ?').get(decoded.id);
+    const user = await db.prepare('SELECT id, name, email, role, status, phone, revoked_permissions FROM users WHERE id = ?').get(decoded.id);
     if (!user) return res.status(401).json({ error: 'المستخدم غير موجود' });
     if (user.status === 'blocked') return res.status(403).json({ error: 'تم حظر حسابك. تواصل مع الإدارة.' });
     if (user.status === 'pending') return res.status(403).json({ error: 'حسابك قيد المراجعة من الإدارة.' });
@@ -20,7 +20,10 @@ const authMiddleware = async (req, res, next) => {
     // Load user permissions (admins have all permissions)
     if (user.role === 'admin') {
       const allPerms = await db.prepare('SELECT key FROM permissions').all();
-      user.permissions = allPerms.map(p => p.key);
+      const revokedPermissions = Array.isArray(user.revoked_permissions)
+        ? user.revoked_permissions
+        : (() => { try { return JSON.parse(user.revoked_permissions || '[]'); } catch (_) { return []; } })();
+      user.permissions = allPerms.map(p => p.key).filter((key) => !revokedPermissions.includes(key));
     } else {
       const perms = await db.prepare('SELECT permission_key FROM user_permissions WHERE user_id = ?').all(user.id);
       user.permissions = perms.map(p => p.permission_key);
