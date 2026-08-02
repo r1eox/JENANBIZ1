@@ -120,6 +120,7 @@ async function initDatabase() {
     min_deposit_amount REAL DEFAULT 0,
     min_transfer_amount REAL DEFAULT 0,
     min_deposit_transfer_amount REAL DEFAULT 0,
+    annual_deposit_amount REAL DEFAULT 0,
     min_months INTEGER DEFAULT 6,
     product_types TEXT DEFAULT '[]',
     required_documents TEXT DEFAULT '[]',
@@ -130,6 +131,18 @@ async function initDatabase() {
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
   )`);
+
+  await pool.query(`ALTER TABLE funding_entities ADD COLUMN IF NOT EXISTS annual_deposit_amount REAL DEFAULT 0`);
+  await pool.query(`
+    UPDATE funding_entities
+    SET annual_deposit_amount = COALESCE(NULLIF(annual_deposit_amount, 0), min_deposit_transfer_amount, min_deposit_amount, min_pos_amount, 0)
+    WHERE annual_deposit_amount IS NULL OR annual_deposit_amount = 0
+  `);
+  await pool.query(`
+    UPDATE funding_entities
+    SET min_deposit_transfer_amount = COALESCE(NULLIF(min_deposit_transfer_amount, 0), annual_deposit_amount, min_deposit_amount, min_pos_amount, 0)
+    WHERE min_deposit_transfer_amount IS NULL OR min_deposit_transfer_amount = 0
+  `);
 
   await pool.query(`CREATE TABLE IF NOT EXISTS funding_entity_contacts (
     id SERIAL PRIMARY KEY,
@@ -435,7 +448,7 @@ async function initDatabase() {
     const exists = await pool.query('SELECT id FROM funding_entities WHERE name = $1', [e.name]);
     if (exists.rows.length === 0) {
       await pool.query(
-        'INSERT INTO funding_entities (name, priority, product_types, min_deposit_transfer_amount, whatsapp_number) VALUES ($1, $2, $3, 0, $4)',
+        'INSERT INTO funding_entities (name, priority, product_types, min_deposit_transfer_amount, annual_deposit_amount, whatsapp_number) VALUES ($1, $2, $3, 0, 0, $4)',
         [e.name, e.priority, e.product_types, '']
       );
     }

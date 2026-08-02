@@ -525,7 +525,7 @@ router.get('/funding-entities', hasAnyPermission(['manage_funding', 'send_to_fun
     const entities = await db.prepare('SELECT * FROM funding_entities ORDER BY priority DESC').all();
     res.json(entities.map(e => ({
       ...e,
-      annual_deposit_amount: Number(e.min_deposit_transfer_amount || 0),
+      annual_deposit_amount: Number(e.annual_deposit_amount ?? e.min_deposit_transfer_amount ?? e.min_deposit_amount ?? e.min_pos_amount || 0),
       product_types: JSON.parse(e.product_types || '[]'),
       required_documents: JSON.parse(e.required_documents || '[]'),
       additional_whatsapp_numbers: JSON.parse(e.additional_whatsapp_numbers || '[]')
@@ -544,11 +544,11 @@ router.post('/funding-entities', hasPermission('manage_funding'), async (req, re
     const normalizedAnnualDeposit = annual_deposit_amount ?? min_deposit_amount ?? min_pos_amount ?? 0;
     const result = await db.prepare(`
       INSERT INTO funding_entities (name, priority, min_pos_amount, min_deposit_amount, min_transfer_amount,
-        min_months, required_documents, notes, whatsapp_number, additional_whatsapp_numbers, product_types, min_deposit_transfer_amount)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        min_months, required_documents, notes, whatsapp_number, additional_whatsapp_numbers, product_types, min_deposit_transfer_amount, annual_deposit_amount)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(name.trim(), priority || 0, min_pos_amount || 0, min_deposit_amount || 0, min_transfer_amount || 0,
       min_months || 6, JSON.stringify(required_documents || []), notes || '', whatsapp_number || '',
-      JSON.stringify(additional_whatsapp_numbers || []), JSON.stringify(product_types || []), normalizedAnnualDeposit || 0);
+      JSON.stringify(additional_whatsapp_numbers || []), JSON.stringify(product_types || []), normalizedAnnualDeposit || 0, normalizedAnnualDeposit || 0);
     res.status(201).json({ id: result.lastInsertRowid, message: 'تمت إضافة الجهة التمويلية' });
   } catch (err) {
     console.error(err);
@@ -562,10 +562,10 @@ router.put('/funding-entities/:id', hasPermission('manage_funding'), async (req,
     if (!entity) return res.status(404).json({ error: 'الجهة غير موجودة' });
     const { name, priority, min_pos_amount, min_deposit_amount, min_transfer_amount, min_months,
       annual_deposit_amount, required_documents, notes, whatsapp_number, additional_whatsapp_numbers, product_types, is_active } = req.body;
-    const normalizedAnnualDeposit = annual_deposit_amount ?? min_deposit_amount ?? min_pos_amount ?? entity.min_deposit_transfer_amount ?? 0;
+    const normalizedAnnualDeposit = annual_deposit_amount ?? min_deposit_amount ?? min_pos_amount ?? entity.annual_deposit_amount ?? entity.min_deposit_transfer_amount ?? 0;
     await db.prepare(`UPDATE funding_entities SET name=?, priority=?, min_pos_amount=?, min_deposit_amount=?,
       min_transfer_amount=?, min_months=?, required_documents=?, notes=?, whatsapp_number=?,
-      additional_whatsapp_numbers=?, product_types=?, min_deposit_transfer_amount=?, is_active=?, updated_at=NOW() WHERE id=?`
+      additional_whatsapp_numbers=?, product_types=?, min_deposit_transfer_amount=?, annual_deposit_amount=?, is_active=?, updated_at=NOW() WHERE id=?`
     ).run(name ?? entity.name, priority ?? entity.priority,
       min_pos_amount ?? entity.min_pos_amount, min_deposit_amount ?? entity.min_deposit_amount,
       min_transfer_amount ?? entity.min_transfer_amount, min_months ?? entity.min_months,
@@ -573,6 +573,7 @@ router.put('/funding-entities/:id', hasPermission('manage_funding'), async (req,
       notes ?? entity.notes, whatsapp_number ?? entity.whatsapp_number,
       additional_whatsapp_numbers ? JSON.stringify(additional_whatsapp_numbers) : entity.additional_whatsapp_numbers,
       product_types ? JSON.stringify(product_types) : entity.product_types,
+      normalizedAnnualDeposit,
       normalizedAnnualDeposit,
       is_active !== undefined ? (is_active ? 1 : 0) : entity.is_active, req.params.id);
     res.json({ message: 'تم تحديث الجهة التمويلية' });
