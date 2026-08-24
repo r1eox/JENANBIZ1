@@ -97,6 +97,7 @@ export default function Eligibility() {
     employeeName: '',
     salaryAmount: '',
     existingDebtAmount: '',
+    monthlyInstallment: '',
     personalNationality: 'سعودي',
     hasSimahIssues: 'لا',
     hasServiceStop: 'لا',
@@ -146,6 +147,7 @@ export default function Eligibility() {
       employeeName: nextFundingType === 'تمويل شخصي' ? current.employeeName : '',
       salaryAmount: nextFundingType === 'تمويل شخصي' ? current.salaryAmount : '',
       existingDebtAmount: (!['إقرارات ضريبية', 'عقار', 'رهن'].includes(nextFundingType) || nextFundingType === 'تمويل شخصي') ? current.existingDebtAmount : '',
+      monthlyInstallment: nextFundingType === 'تمويل شخصي' ? current.monthlyInstallment : '',
       personalNationality: nextFundingType === 'تمويل شخصي' ? current.personalNationality : 'سعودي',
       hasSimahIssues: nextFundingType === 'تمويل شخصي' ? current.hasSimahIssues : 'لا',
       hasServiceStop: nextFundingType === 'تمويل شخصي' ? current.hasServiceStop : 'لا',
@@ -202,6 +204,7 @@ export default function Eligibility() {
           liabilitiesAmount: (isPersonalFunding || isRevenueBasedFunding) && (isPersonalFunding || form.hasExistingDebt === 'نعم') ? (Number(form.existingDebtAmount) || 0) : 0,
           profitRatio:     form.hasFinancialStatements === 'نعم' ? (Number(form.profitRatio) || 0) : 0,
           personalSalary:  isPersonalFunding ? (Number(form.salaryAmount) || 0) : 0,
+          monthlyInstallment: isPersonalFunding ? (Number(form.monthlyInstallment) || 0) : 0,
           hasSimahIssues:  isPersonalFunding ? form.hasSimahIssues === 'نعم' : false,
           hasServiceStop:  isPersonalFunding ? form.hasServiceStop === 'نعم' : false,
           personalNationality: isPersonalFunding ? form.personalNationality : 'سعودي',
@@ -244,8 +247,8 @@ export default function Eligibility() {
             : `يشترط توفر آخر ${requiredTaxReturnsCount} إقرارات ${form.taxReturnPeriod === 'ربعية' ? 'ضريبية ربعية' : 'ضريبية شهرية'} لهذه الحالة.`))
     : isPersonalFunding
       ? (personalEligible
-          ? `الجنسية ${form.personalNationality}، الراتب ${SAR(Number(form.salaryAmount) || 0)}، والمديونية ضمن 33% ولا توجد موانع تنفيذية أو تعثرات.`
-          : 'يشترط للتمويل الشخصي: سعودي، راتب 4,000 ر.س فأعلى، مديونية لا تتجاوز 33%، ولا يوجد تعثر أو إيقاف خدمات أو سند تنفيذي.')
+          ? `الجنسية ${form.personalNationality}، الراتب ${SAR(Number(form.salaryAmount) || 0)}، وإجمالي المديونية والقسط الشهري ضمن 33% من الراتب، ولا توجد موانع تنفيذية أو تعثرات.`
+          : 'يشترط للتمويل الشخصي: سعودي، راتب 4,000 ر.س فأعلى، إجمالي المديونية لا يتجاوز 33% من الراتب، والقسط الشهري لا يتجاوز 33% من الراتب، ولا يوجد تعثر أو إيقاف خدمات أو سند تنفيذي.')
     : isPropertyFunding
       ? (propertyEligible
           ? `تمت مطابقة بيانات ${form.fundingType} على فئة ${form.applicantCategory} مع قيمة أصل ${SAR(Number(form.propertyValue) || 0)}.`
@@ -260,9 +263,9 @@ export default function Eligibility() {
       <div>
         <h1 className="text-2xl font-black text-gray-900 flex items-center gap-2">
           <ClipboardCheck size={24} className="text-blue-500" />
-          فاحص أهلية المنشأة
+          فاحص أهلية التمويل
         </h1>
-        <p className="text-sm text-gray-500 mt-1">أدخل بيانات المنشأة لمعرفة مدى أهليتها للتمويل والجهات المناسبة</p>
+        <p className="text-sm text-gray-500 mt-1">أدخل البيانات لمعرفة مدى أهلية التمويل والجهة المناسبة</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
@@ -369,19 +372,27 @@ export default function Eligibility() {
             {isPersonalFunding && (
               <>
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label="المديونية القائمة (ر.س)">
+                  <Field label="إجمالي المديونية الحالية (ر.س)">
                     <div className="relative">
                       <NumberInput value={form.existingDebtAmount} onChange={set('existingDebtAmount')} placeholder="0" />
                       <Briefcase size={15} className="absolute right-3 top-3 text-gray-400" />
                     </div>
                   </Field>
+                  <Field label="القسط الشهري الحالي (ر.س)">
+                    <div className="relative">
+                      <NumberInput value={form.monthlyInstallment} onChange={set('monthlyInstallment')} placeholder="0" />
+                      <Wallet size={15} className="absolute right-3 top-3 text-gray-400" />
+                    </div>
+                  </Field>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
                   <Field label="يوجد تعثر أو تأخير في سمة؟">
                     <Select value={form.hasSimahIssues} onChange={set('hasSimahIssues')} options={FINANCIAL_STATEMENT_OPTIONS} />
                   </Field>
+                  <Field label="هل يوجد إيقاف خدمات أو سند تنفيذي؟">
+                    <Select value={form.hasServiceStop} onChange={set('hasServiceStop')} options={FINANCIAL_STATEMENT_OPTIONS} />
+                  </Field>
                 </div>
-                <Field label="هل يوجد إيقاف خدمات أو سند تنفيذي؟">
-                  <Select value={form.hasServiceStop} onChange={set('hasServiceStop')} options={FINANCIAL_STATEMENT_OPTIONS} />
-                </Field>
               </>
             )}
 

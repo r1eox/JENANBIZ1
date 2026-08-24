@@ -315,6 +315,7 @@ async function checkEligibility(
   liabilitiesAmount = 0,
   profitRatio = 0,
   personalSalary = 0,
+  monthlyInstallment = 0,
   hasSimahIssues = false,
   hasServiceStop = false,
   personalNationality = 'سعودي',
@@ -356,8 +357,11 @@ async function checkEligibility(
     const hasNoServiceBlocks = !hasServiceStop;
     const salaryEligible = salaryAmount >= 4000;
     const debtEligible = salaryAmount > 0 && debtAmount <= salaryAmount * 0.33;
+    const monthlyInstallmentAmount = Number(monthlyInstallment) || 0;
+    const monthlyInstallmentLimit = salaryAmount > 0 ? salaryAmount * 0.33 : 0;
+    const monthlyInstallmentEligible = salaryAmount > 0 && monthlyInstallmentAmount <= monthlyInstallmentLimit;
 
-    isEligible = isSaudiCitizen && salaryEligible && debtEligible && hasCleanSimah && hasNoServiceBlocks;
+    isEligible = isSaudiCitizen && salaryEligible && debtEligible && monthlyInstallmentEligible && hasCleanSimah && hasNoServiceBlocks;
 
     if (isEligible) {
       matchedRules.push('تمويل شخصي سعودي بدون تعثر أو إيقاف خدمات');
@@ -366,13 +370,14 @@ async function checkEligibility(
           entities,
           ['تمويل شخصي', 'شخصي'],
           'تمويل شخصي',
-          'مؤهل لتمويل شخصي: الجنسية سعودي، الراتب 4,000 ر.س فأعلى، والمديونية لا تتجاوز 33% من الراتب مع خلو الحالة من التعثر وإيقاف الخدمات.'
+          'مؤهل لتمويل شخصي: الجنسية سعودي، الراتب 4,000 ر.س فأعلى، وإجمالي المديونية والقسط الشهري لا يتجاوزان 33% من الراتب مع خلو الحالة من التعثر وإيقاف الخدمات.'
         ),
       ];
     } else {
       if (!isSaudiCitizen) tips.push('التمويل الشخصي في هذا المسار مخصص حالياً للسعوديين فقط.');
       if (!salaryEligible) tips.push('يشترط أن يكون الراتب 4,000 ر.س فأعلى للتمويل الشخصي.');
-      if (!debtEligible) tips.push('يشترط ألا تتجاوز المديونية القائمة 33% من الراتب الشهري.');
+      if (!debtEligible) tips.push('يشترط ألا تتجاوز إجمالي المديونية 33% من الراتب الشهري.');
+      if (!monthlyInstallmentEligible) tips.push('يشترط ألا يتجاوز القسط الشهري 33% من الراتب الشهري.');
       if (!hasCleanSimah) tips.push('وجود تعثر أو تأخير في سمة يجعل الحالة غير مؤهلة للتمويل الشخصي.');
       if (!hasNoServiceBlocks) tips.push('وجود إيقاف خدمات أو سند تنفيذي يجعل الحالة غير مؤهلة للتمويل الشخصي.');
     }
@@ -690,7 +695,7 @@ router.post('/eligibility-check', authMiddleware, async (req, res) => {
       months = 12, fundingType = 'نقاط بيع', bankName = '',
       recordAgeMonths = 0, ownershipType = 'سعودي', entityType = 'شركة',
       liabilitiesAmount = 0, profitRatio = 0,
-      personalSalary = 0, hasSimahIssues = false, hasServiceStop = false, personalNationality = 'سعودي',
+      personalSalary = 0, monthlyInstallment = 0, hasSimahIssues = false, hasServiceStop = false, personalNationality = 'سعودي',
       applicantCategory = '', propertyValue = 0, monthlyIncome = 0,
       hasDownPayment = false, downPaymentAmount = 0, hasPropertyTitle = false,
     } = req.body;
@@ -700,7 +705,7 @@ router.post('/eligibility-check', authMiddleware, async (req, res) => {
       Number(months), fundingType, bankName,
       Number(recordAgeMonths), ownershipType, entityType,
       Number(liabilitiesAmount), Number(profitRatio),
-      Number(personalSalary), Boolean(hasSimahIssues), Boolean(hasServiceStop), personalNationality,
+      Number(personalSalary), Number(monthlyInstallment), Boolean(hasSimahIssues), Boolean(hasServiceStop), personalNationality,
       applicantCategory, Number(propertyValue), Number(monthlyIncome),
       Boolean(hasDownPayment), Number(downPaymentAmount), Boolean(hasPropertyTitle)
     );
