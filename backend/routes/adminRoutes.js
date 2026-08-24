@@ -31,6 +31,12 @@ function parseObjectField(value) {
   }
 }
 
+function isPrimaryAdminUser(user = {}) {
+  const primaryAdminEmail = (process.env.PRIMARY_ADMIN_EMAIL || '').trim().toLowerCase();
+  if (!primaryAdminEmail || !user || !user.email) return false;
+  return String(user.email).trim().toLowerCase() === primaryAdminEmail;
+}
+
 function parseRequestRow(request = null) {
   if (!request) return request;
   return {
@@ -146,17 +152,23 @@ router.put('/users/:id/status', hasPermission('approve_users'), async (req, res)
 
 router.delete('/users/:id', hasPermission('manage_users'), async (req, res) => {
   try {
-    const user = await db.prepare('SELECT role FROM users WHERE id = ?').get(req.params.id);
+    const user = await db.prepare('SELECT id, role, email FROM users WHERE id = ?').get(req.params.id);
     if (!user) return res.status(404).json({ error: 'المستخدم غير موجود' });
-    if (Number(req.params.id) === Number(req.user.id)) return res.status(403).json({ error: 'لا يمكنك حذف حسابك الحالي' });
-    if (user.role === 'admin') {
+
+    const isPrimaryAdmin = isPrimaryAdminUser(user);
+    if (Number(req.params.id) === Number(req.user.id) && !isPrimaryAdmin) {
+      return res.status(403).json({ error: 'لا يمكنك حذف حسابك الحالي' });
+    }
+
+    if (user.role === 'admin' && !isPrimaryAdmin) {
       const adminCountRow = await db.prepare('SELECT COUNT(*) as count FROM users WHERE role = \'admin\'').get();
       if (Number(adminCountRow?.count || 0) <= 1) {
         return res.status(403).json({ error: 'يجب إبقاء مدير واحد على الأقل في النظام' });
       }
     }
+
     await db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
-    res.json({ message: 'تم حذف المستخدم' });
+    res.json({ message: isPrimaryAdmin ? 'تم حذف الحساب الأساسي بنجاح' : 'تم حذف المستخدم' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'خطأ في الحذف' });
@@ -171,10 +183,13 @@ router.post('/users/bulk-delete', hasPermission('manage_users'), async (req, res
     let deletedCount = 0;
 
     for (const id of ids) {
-      if (Number(id) === Number(req.user.id)) continue;
-      const user = await db.prepare('SELECT role FROM users WHERE id = ?').get(id);
+      const user = await db.prepare('SELECT id, role, email FROM users WHERE id = ?').get(id);
       if (!user) continue;
-      if (user.role === 'admin') {
+
+      const isPrimaryAdmin = isPrimaryAdminUser(user);
+      if (Number(id) === Number(req.user.id) && !isPrimaryAdmin) continue;
+
+      if (user.role === 'admin' && !isPrimaryAdmin) {
         const adminCountRow = await db.prepare('SELECT COUNT(*) as count FROM users WHERE role = \'admin\'').get();
         if (Number(adminCountRow?.count || 0) <= 1) continue;
       }
@@ -525,7 +540,7 @@ router.get('/funding-entities', hasAnyPermission(['manage_funding', 'send_to_fun
     const entities = await db.prepare('SELECT * FROM funding_entities ORDER BY priority DESC').all();
     res.json(entities.map(e => ({
       ...e,
-      annual_deposit_amount: Number(e.annual_deposit_amount ?? e.min_deposit_transfer_amount ?? e.min_deposit_amount ?? e.min_pos_amount || 0),
+      annual_deposit_amount: Number(e.annual_deposit_amount ?? e.min_deposit_transfer_amount ?? e.min_deposit_amount ?? e.min_pos_amount ?? 0),
       product_types: JSON.parse(e.product_types || '[]'),
       required_documents: JSON.parse(e.required_documents || '[]'),
       additional_whatsapp_numbers: JSON.parse(e.additional_whatsapp_numbers || '[]')
