@@ -16,6 +16,26 @@ const PROPERTY_TYPES = ['شقة', 'فيلا', 'أرض', 'عمارة', 'أخرى'
 
 const SAR = n => `${Number(n).toLocaleString('ar-SA', { maximumFractionDigits: 0 })} ر.س`;
 
+function buildPersonalFundingProjection(salaryAmount, monthlyInstallment) {
+  const salary = Number(salaryAmount) || 0;
+  const currentInstallment = Number(monthlyInstallment) || 0;
+  const maxEligibilityInstallment = salary * 0.33;
+  const maxBankInstallment = salary * 0.5;
+  const availableInstallment = Math.max(0, maxBankInstallment - currentInstallment);
+  const grossAmount = availableInstallment * 60;
+  const expectedProfit = grossAmount * 0.15;
+  const netAmount = Math.max(0, grossAmount - expectedProfit);
+
+  return {
+    maxEligibilityInstallment,
+    maxBankInstallment,
+    availableInstallment,
+    grossAmount,
+    expectedProfit,
+    netAmount,
+  };
+}
+
 function Field({ label, children }) {
   return (
     <div>
@@ -231,6 +251,9 @@ export default function Eligibility() {
   const eligible = isTaxFunding ? declarationEligible : (isPersonalFunding ? personalEligible : (isPropertyFunding ? propertyEligible : cashEligibleAlternative));
   const showApproximateFunding = eligible && isRevenueBasedFunding && Number(result?.approximateFundingMax) >= 0;
   const hasDebtAdjustment = Number(result?.debtAmount) > 0;
+  const personalProjection = isPersonalFunding
+    ? buildPersonalFundingProjection(form.salaryAmount, form.monthlyInstallment)
+    : null;
   const canViewBankNames = isAdmin || user?.role === 'employee';
   const statusTitle = isTaxFunding
     ? (declarationEligible ? 'أنت مؤهل لتمويل الإقرارات' : 'أنت غير مؤهل لتمويل الإقرارات حالياً')
@@ -603,6 +626,32 @@ export default function Eligibility() {
               </div>
               )}
 
+              {isPersonalFunding && personalProjection && (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  <StatCard
+                    icon={Percent}
+                    label="حد القسط الشهري للأهلية (33%)"
+                    value={SAR(personalProjection.maxEligibilityInstallment)}
+                    sub="إذا تجاوزته الحالة لا تكون مؤهلة"
+                    tone="amber"
+                  />
+                  <StatCard
+                    icon={Wallet}
+                    label="القسط المتاح حتى 50%"
+                    value={SAR(personalProjection.availableInstallment)}
+                    sub={`50% من الراتب (${SAR(personalProjection.maxBankInstallment)}) ناقص القسط الحالي`}
+                    tone="blue"
+                  />
+                  <StatCard
+                    icon={BadgeDollarSign}
+                    label="مبلغ التمويل المستلم (تقديري)"
+                    value={SAR(personalProjection.netAmount)}
+                    sub={`(${SAR(personalProjection.grossAmount)} - ربح ${SAR(personalProjection.expectedProfit)}) لمدة 60 شهر`}
+                    tone="green"
+                  />
+                </div>
+              )}
+
               {showApproximateFunding && (
                 <div className="bg-blue-50 rounded-2xl border border-blue-200 p-5">
                   <div className="flex items-start gap-3">
@@ -643,9 +692,9 @@ export default function Eligibility() {
                           <p className="font-bold text-gray-800 text-sm">{e.name}</p>
                           {e.notes && <p className="text-xs text-gray-500 mt-1">{e.notes}</p>}
                           <div className="flex flex-wrap gap-2 mt-2">
-                            {e.min_pos_amount > 0 && (
+                            {Number(e.annual_deposit_amount ?? e.min_pos_amount) > 0 && (
                               <span className="text-xs bg-white border border-blue-100 rounded-full px-2 py-0.5 text-blue-600">
-                                حد أدنى POS: {SAR(e.min_pos_amount)}
+                                الإيداعات السنوية المطلوبة: {SAR(Number(e.annual_deposit_amount ?? e.min_pos_amount))}
                               </span>
                             )}
                             {e.min_months > 0 && (

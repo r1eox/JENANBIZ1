@@ -80,6 +80,7 @@ function createInitialProductDetails(fundingType = 'نقاط بيع') {
         employee_name: '',
         salary_amount: '',
         existing_debt_amount: '',
+        monthly_installment: '',
         personal_nationality: 'سعودي',
         has_simah_issues: 'لا',
         has_service_stop: 'لا',
@@ -406,8 +407,12 @@ function ProductDetailsFields({ form, setForm }) {
             <input value={productDetails.salary_amount || ''} onChange={(e) => setDetails({ salary_amount: e.target.value })} className={INPUT_CLASS} placeholder="مثال: 8500" />
           </div>
           <div>
-            <label className={LABEL_CLASS}>إجمالي الالتزامات الحالية</label>
+            <label className={LABEL_CLASS}>إجمالي المديونية الحالية</label>
             <input value={productDetails.existing_debt_amount || ''} onChange={(e) => setDetails({ existing_debt_amount: e.target.value })} className={INPUT_CLASS} placeholder="مثال: 1500" />
+          </div>
+          <div>
+            <label className={LABEL_CLASS}>القسط الشهري الحالي</label>
+            <input value={productDetails.monthly_installment || ''} onChange={(e) => setDetails({ monthly_installment: e.target.value })} className={INPUT_CLASS} placeholder="مثال: 1200" />
           </div>
           <div>
             <label className={LABEL_CLASS}>الجنسية</label>
@@ -699,16 +704,17 @@ function NamedDocumentsUploader({ documents, uploadingDocId, onUpload, getFileUr
             <label className={`mt-2 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed px-2.5 py-1.5 text-[10px] font-semibold transition-colors sm:mt-3 sm:gap-2 sm:rounded-xl sm:px-4 sm:py-2.5 sm:text-xs ${uploadingDocId === document.id ? 'border-blue-300 bg-blue-50 text-blue-600' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
               <Upload size={13} className="flex-shrink-0 sm:hidden" />
               <Upload size={14} className="hidden flex-shrink-0 sm:block" />
-                <span className="sm:hidden">{uploadingDocId === document.id ? 'جارٍ الرفع...' : (document.file_path ? 'استبدال' : 'رفع')}</span>
-                <span className="hidden sm:inline">{uploadingDocId === document.id ? 'جارٍ الرفع...' : (document.file_path ? 'استبدال المستند' : 'رفع المستند')}</span>
+                <span className="sm:hidden">{uploadingDocId === document.id ? 'جارٍ الرفع...' : (document.file_path ? 'استبدال/إضافة' : 'رفع')}</span>
+                <span className="hidden sm:inline">{uploadingDocId === document.id ? 'جارٍ الرفع...' : (document.file_path ? 'استبدال أو إضافة مستندات' : 'رفع المستند')}</span>
                 <input
                   type="file"
                   accept={DOC_UPLOAD_ACCEPT}
+                  multiple
                   className="hidden"
                   disabled={uploadingDocId === document.id}
                   onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) onUpload(document.id, file);
+                    const files = Array.from(event.target.files || []);
+                    if (files.length > 0) onUpload(document.id, files);
                     event.target.value = '';
                   }}
                 />
@@ -884,12 +890,12 @@ export default function Requests() {
     setSubmittingPackageId(null);
   };
 
-  const uploadRequestDocument = async ({ requestId, docId, file, refresh }) => {
-    if (!requestId || !docId || !file) return;
+  const uploadRequestDocument = async ({ requestId, docId, files, refresh }) => {
+    if (!requestId || !docId || !Array.isArray(files) || files.length === 0) return;
 
     setUploadingDocId(docId);
     const fd = new FormData();
-    fd.append('file', file);
+    files.forEach((file) => fd.append('files', file));
 
     const res = await authFetch(`/api/requests/${requestId}/documents/${docId}/upload`, {
       method: 'POST',
@@ -1145,12 +1151,12 @@ export default function Requests() {
     }
   };
 
-  const uploadMissingDoc = async (docId, file) => {
-    if (!reviewReq || !file) return;
+  const uploadMissingDoc = async (docId, files) => {
+    if (!reviewReq || !files?.length) return;
     await uploadRequestDocument({
       requestId: reviewReq.id,
       docId,
-      file,
+      files,
       refresh: () => reloadReview(reviewReq.id),
     });
   };
@@ -1364,7 +1370,7 @@ export default function Requests() {
                   <th className="text-right px-4 py-3.5 font-semibold text-gray-500 text-xs">المنشأة</th>
                   <th className="text-right px-4 py-3.5 font-semibold text-gray-500 text-xs hidden md:table-cell">جوال المالك</th>
                   <th className="text-right px-4 py-3.5 font-semibold text-gray-500 text-xs hidden lg:table-cell">نوع التمويل</th>
-                  {isAdmin && <th className="text-right px-4 py-3.5 font-semibold text-gray-500 text-xs hidden md:table-cell">الموظف / الشريك</th>}
+                  {isAdmin && <th className="text-right px-4 py-3.5 font-semibold text-gray-500 text-xs hidden md:table-cell">الموظف</th>}
                   <th className="text-right px-4 py-3.5 font-semibold text-gray-500 text-xs hidden lg:table-cell">الجهة التمويلية</th>
                   <th className="text-right px-4 py-3.5 font-semibold text-gray-500 text-xs">الحالة</th>
                   <th className="text-right px-4 py-3.5 font-semibold text-gray-500 text-xs hidden sm:table-cell">التاريخ</th>
@@ -1527,10 +1533,10 @@ export default function Requests() {
                   <ProductDetailsFields form={newForm} setForm={setNewForm} />
                   {isAdmin && partners.length > 0 && (
                     <div>
-                      <label className="block text-xs font-semibold text-gray-600 mb-1">الموظف / الشريك</label>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">الموظف المسؤول</label>
                       <select value={newForm.referred_by_id} onChange={e => setNewForm((current) => ({ ...current, referred_by_id: e.target.value }))} className={SELECT_CLASS}>
                         <option value="">اختر...</option>
-                        {partners.map(p => <option key={p.id} value={p.id}>{formatPartnerLabel(p)}</option>)}
+                        {partners.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                       </select>
                     </div>
                   )}
@@ -1627,10 +1633,10 @@ export default function Requests() {
                       <NamedDocumentsUploader
                         documents={newRequestDocuments}
                         uploadingDocId={uploadingDocId}
-                        onUpload={(docId, file) => uploadRequestDocument({
+                        onUpload={(docId, files) => uploadRequestDocument({
                           requestId: newReqId,
                           docId,
-                          file,
+                          files,
                           refresh: async () => {
                             const detailData = await fetchUserRequestDetails(newReqId);
                             setNewRequestData(detailData);

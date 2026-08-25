@@ -717,12 +717,12 @@ router.post('/eligibility-check', authMiddleware, async (req, res) => {
   }
 });
 
-// GET /api/requests/partners-list — list of approved partners (for broker dropdown)
+// GET /api/requests/partners-list — list of approved employees (for assignment dropdown)
 router.get('/partners-list', authMiddleware, async (req, res) => {
   try {
     const partners = await db.prepare(`
       SELECT id, name, phone, role, partner_type FROM users
-      WHERE role = 'partner' AND status = 'approved'
+      WHERE role = 'employee' AND status = 'approved'
       ORDER BY name
     `).all();
     res.json(partners);
@@ -770,7 +770,7 @@ router.post('/', authMiddleware, async (req, res) => {
     }
     let partnerId = null;
     if (referred_by_id) {
-      const partner = await db.prepare("SELECT id FROM users WHERE id = ? AND role = 'partner' AND status = 'approved'").get(referred_by_id);
+      const partner = await db.prepare("SELECT id FROM users WHERE id = ? AND role = 'employee' AND status = 'approved'").get(referred_by_id);
       if (partner) partnerId = partner.id;
     }
     const result = await db.prepare(`
@@ -1138,40 +1138,62 @@ router.post('/:id/select-entity', authMiddleware, async (req, res) => {
 });
 
 // POST /api/requests/:id/documents/:docId/upload
-router.post('/:id/documents/:docId/upload', authMiddleware, docUpload.single('file'), async (req, res) => {
+router.post('/:id/documents/:docId/upload', authMiddleware, docUpload.array('files', 10), async (req, res) => {
   try {
     const request = await db.prepare('SELECT * FROM requests WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
     if (!request) return res.status(404).json({ error: 'الطلب غير موجود' });
 
     const doc = await db.prepare('SELECT * FROM request_documents WHERE id = ? AND request_id = ?').get(req.params.docId, req.params.id);
     if (!doc) return res.status(404).json({ error: 'المستند غير موجود' });
-    if (!req.file) return res.status(400).json({ error: 'لم يتم رفع الملف' });
+    if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'لم يتم رفع الملف' });
 
     let expiryDate = null;
     let docStatus = 'valid';
     let aiResult = null;
+    let storedPath = null;
+    let storedName = null;
 
-    try {
-      aiResult = await analyzeDocument(req.file.path, decodeUploadedFileName(req.file.originalname));
-      expiryDate = aiResult.expiry_date && aiResult.expiry_date !== 'null' ? aiResult.expiry_date : null;
-      docStatus = aiResult.is_expired ? 'expired' : 'valid';
-    } catch (aiErr) {
-      console.error('Doc AI error:', aiErr.message);
-      docStatus = 'valid';
+    if (req.files.length === 1) {
+      const uploadedFile = req.files[0];
+      try {
+        aiResult = await analyzeDocument(uploadedFile.path, decodeUploadedFileName(uploadedFile.originalname));
+        expiryDate = aiResult.expiry_date && aiResult.expiry_date !== 'null' ? aiResult.expiry_date : null;
+        docStatus = aiResult.is_expired ? 'expired' : 'valid';
+      } catch (aiErr) {
+        console.error('Doc AI error:', aiErr.message);
+        docStatus = 'valid';
+      }
+
+      storedPath = uploadedFile.path;
+      storedName = decodeUploadedFileName(uploadedFile.originalname);
+    } else {
+      const zipName = `doc-${req.params.id}-${req.params.docId}-${Date.now()}.zip`;
+      const zipPath = path.join(__dirname, '../uploads/documents', zipName);
+      await createZipArchive(zipPath, req.files.map((file, index) => ({
+        path: file.path,
+        name: `${String(index + 1).padStart(2, '0')}-${sanitizeArchiveName(decodeUploadedFileName(file.originalname))}`,
+      })));
+
+      for (const uploadedFile of req.files) {
+        try { fs.unlinkSync(uploadedFile.path); } catch (_) {}
+      }
+
+      storedPath = zipPath;
+      storedName = `${sanitizeArchiveName(doc.document_name || 'document')}.zip`;
     }
-
-    const fixedName = decodeUploadedFileName(req.file.originalname);
 
     await db.prepare(`
       UPDATE request_documents SET
         file_path = ?, file_name = ?, expiry_date = ?, status = ?, uploaded_at = NOW()
       WHERE id = ?
-    `).run(req.file.path, fixedName, expiryDate, docStatus, req.params.docId);
+    `).run(storedPath, storedName, expiryDate, docStatus, req.params.docId);
 
     await checkAndUpdateDocStatus(req.params.id);
 
     res.json({
-      message: docStatus === 'expired' ? '⚠️ تحذير: المستند منتهي الصلاحية! يرجى تحديثه.' : 'تم رفع المستند بنجاح',
+      message: req.files.length > 1
+        ? `تم رفع ${req.files.length} ملفات وحفظها كملف مضغوط.`
+        : (docStatus === 'expired' ? '⚠️ تحذير: المستند منتهي الصلاحية! يرجى تحديثه.' : 'تم رفع المستند بنجاح'),
       status: docStatus,
       expiry_date: expiryDate,
       ai_notes: aiResult?.notes || ''
@@ -1322,7 +1344,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
     let partnerId = request.referred_by_id;
     if (referred_by_id !== undefined) {
       if (referred_by_id) {
-        const partner = await db.prepare("SELECT id FROM users WHERE id = ? AND role = 'partner' AND status = 'approved'").get(referred_by_id);
+        const partner = await db.prepare("SELECT id FROM users WHERE id = ? AND role = 'employee' AND status = 'approved'").get(referred_by_id);
         partnerId = partner ? partner.id : null;
       } else { partnerId = null; }
     }

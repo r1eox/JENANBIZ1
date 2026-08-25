@@ -1,4 +1,7 @@
 ﻿const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const archiver = require('archiver');
 const db = require('../database');
 const { adminMiddleware, hasPermission, hasAnyPermission } = require('../middleware/authMiddleware');
 const { createNotification, notifyAdmins } = require('../services/notificationService');
@@ -46,6 +49,85 @@ function parseRequestRow(request = null) {
   return {
     ...request,
     product_details: parseObjectField(request.product_details),
+  };
+}
+
+function sanitizeArchiveName(value = '') {
+  return String(value || '')
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim() || 'file';
+}
+
+async function createZipArchive(zipPath, entries) {
+  await new Promise((resolve, reject) => {
+    const output = fs.createWriteStream(zipPath);
+    const archive = archiver('zip', { zlib: { level: 9 } });
+
+    output.on('close', resolve);
+    output.on('error', reject);
+    archive.on('error', reject);
+
+    archive.pipe(output);
+    for (const entry of entries) {
+      archive.file(entry.path, { name: entry.name });
+    }
+    archive.finalize();
+  });
+}
+
+async function ensureFundingPackageForRequest(request) {
+  if (request.complete_file_path && fs.existsSync(request.complete_file_path)) {
+    return {
+      filePath: request.complete_file_path,
+      fileName: request.complete_file_name || path.basename(request.complete_file_path),
+    };
+  }
+
+  const [documents, bankStatements, accountStatements, taxDocuments] = await Promise.all([
+    db.prepare('SELECT file_path, file_name, document_name FROM request_documents WHERE request_id = ? AND file_path IS NOT NULL ORDER BY id').all(request.id),
+    db.prepare('SELECT file_path, file_name FROM bank_statements WHERE request_id = ? AND file_path IS NOT NULL ORDER BY uploaded_at').all(request.id),
+    db.prepare('SELECT file_path, file_name FROM account_statements WHERE request_id = ? AND file_path IS NOT NULL ORDER BY uploaded_at').all(request.id),
+    db.prepare('SELECT file_path, file_name FROM tax_documents WHERE request_id = ? AND file_path IS NOT NULL ORDER BY uploaded_at').all(request.id),
+  ]);
+
+  const entries = [];
+  const pushEntries = (items, category) => {
+    for (const item of items) {
+      if (!item.file_path || !fs.existsSync(item.file_path)) continue;
+      entries.push({
+        path: item.file_path,
+        name: `${category}/${sanitizeArchiveName(item.file_name || item.document_name || path.basename(item.file_path))}`,
+      });
+    }
+  };
+
+  pushEntries(documents, 'المستندات');
+  pushEntries(bankStatements, 'الكشوفات البنكية');
+  pushEntries(accountStatements, 'القوائم الحسابية');
+  pushEntries(taxDocuments, 'الوثائق الضريبية');
+
+  if (entries.length === 0) return null;
+  if (entries.length === 1 && String(entries[0].path).toLowerCase().endsWith('.zip')) {
+    return {
+      filePath: entries[0].path,
+      fileName: entries[0].name,
+    };
+  }
+
+  const uploadsDir = path.join(__dirname, '../uploads/complete-files');
+  if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+  const zipName = `request-${request.id}-${Date.now()}.zip`;
+  const zipPath = path.join(uploadsDir, zipName);
+  await createZipArchive(zipPath, entries);
+
+  await db.prepare('UPDATE requests SET complete_file_path = ?, complete_file_name = ?, updated_at = NOW() WHERE id = ?')
+    .run(zipPath, zipName, request.id);
+
+  return {
+    filePath: zipPath,
+    fileName: zipName,
   };
 }
 
@@ -516,8 +598,10 @@ router.post('/requests/:id/assign-funding', hasPermission('send_to_funding'), as
       link: `/requests?view=${request.id}`,
     });
 
-    const packageUrl = request.complete_file_path
-      ? `${req.protocol}://${req.get('host')}/uploads/${request.complete_file_path.replace(/\\/g, '/').split('/uploads/').pop()}`
+    const packageInfo = await ensureFundingPackageForRequest(request);
+
+    const packageUrl = packageInfo?.filePath
+      ? `${req.protocol}://${req.get('host')}/uploads/${packageInfo.filePath.replace(/\\/g, '/').split('/uploads/').pop()}`
       : null;
     const whatsappNumber = String(entity.whatsapp_number || '').replace(/\D/g, '');
     const whatsappUrl = whatsappNumber
@@ -934,8 +1018,6 @@ router.get('/brokers', adminMiddleware, async (req, res) => {
 
 // ===== CONTRACTS =====
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 
 const contractStorage = multer.diskStorage({
   destination: (req, file, cb) => {

@@ -4,22 +4,21 @@ import { Plus, Trash2, Search, X, Edit2, Phone, Building2, Users } from 'lucide-
 
 const FALLBACK_PRODUCT_TYPES = ['كاش', 'نقاط بيع', 'عقار', 'تمويل شخصي', 'أسطول', 'رهن', 'تمويل تجاري'];
 const PRODUCT_FIELD_SETS = {
-  'كاش': ['annual_deposit_amount', 'min_months', 'whatsapp_number'],
-  'نقاط بيع': ['annual_deposit_amount', 'min_months', 'whatsapp_number'],
-  'تمويل تجاري': ['annual_deposit_amount', 'min_transfer_amount', 'min_months', 'whatsapp_number'],
-  'تمويل شخصي': ['min_transfer_amount', 'min_months', 'whatsapp_number'],
-  'عقار': ['min_transfer_amount', 'min_months', 'whatsapp_number'],
-  'رهن': ['min_transfer_amount', 'min_months', 'whatsapp_number'],
-  'أسطول': ['min_transfer_amount', 'min_months', 'whatsapp_number'],
+  'كاش': ['annual_deposit_amount', 'min_months'],
+  'نقاط بيع': ['annual_deposit_amount', 'min_months'],
+  'تمويل تجاري': ['annual_deposit_amount', 'min_transfer_amount', 'min_months'],
+  'تمويل شخصي': ['min_transfer_amount', 'min_months'],
+  'عقار': ['min_transfer_amount', 'min_months'],
+  'رهن': ['min_transfer_amount', 'min_months'],
+  'أسطول': ['min_transfer_amount', 'min_months'],
 };
 
-const DEFAULT_VISIBLE_FIELDS = ['annual_deposit_amount', 'min_transfer_amount', 'min_months', 'whatsapp_number'];
+const DEFAULT_VISIBLE_FIELDS = ['annual_deposit_amount', 'min_transfer_amount', 'min_months'];
 
 const FIELD_META = {
   annual_deposit_amount: { label: 'الإيداعات السنوية', helper: 'بديل موحد لحقول أدنى إيداع ونقاط البيع' },
   min_transfer_amount: { label: 'الحد الأدنى للتحويل', helper: 'يُعرض فقط للأنواع التي تحتاج شرط تحويل' },
   min_months: { label: 'عدد الأشهر', helper: 'مدة كشف الحساب أو النشاط' },
-  whatsapp_number: { label: 'رقم واتساب', helper: 'رقم الجهة التمويلية' },
 };
 
 const getAnnualDepositAmount = (entity) => Number(entity.annual_deposit_amount ?? entity.min_deposit_transfer_amount ?? entity.min_deposit_amount ?? entity.min_pos_amount ?? 0);
@@ -170,6 +169,19 @@ export default function Companies() {
   const allVisibleEntitiesSelected = visibleEntityIds.length > 0 && visibleEntityIds.every(id => selectedEntityIds.includes(id));
   const activeProductType = entityForm.product_types[0] || '';
   const visibleFields = PRODUCT_FIELD_SETS[activeProductType] || DEFAULT_VISIBLE_FIELDS;
+
+  const setEntityPrimaryType = (nextType) => {
+    const nextVisible = PRODUCT_FIELD_SETS[nextType] || DEFAULT_VISIBLE_FIELDS;
+    setEntityForm((current) => {
+      const nextForm = { ...current, product_types: nextType ? [nextType] : [] };
+      ['annual_deposit_amount', 'min_transfer_amount', 'min_months'].forEach((fieldKey) => {
+        if (!nextVisible.includes(fieldKey)) {
+          nextForm[fieldKey] = fieldKey === 'min_months' ? 6 : 0;
+        }
+      });
+      return nextForm;
+    });
+  };
 
   const toggleSelectAllEntities = () => {
     if (allVisibleEntitiesSelected) {
@@ -344,7 +356,7 @@ export default function Companies() {
                   <label className="block text-sm font-semibold text-gray-700 mb-1">النوع الأساسي</label>
                   <select
                     value={activeProductType}
-                    onChange={e => setEntityForm(form => ({ ...form, product_types: e.target.value ? [e.target.value] : [] }))}
+                    onChange={e => setEntityPrimaryType(e.target.value)}
                     className="w-full border border-gray-200 rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                   >
                     <option value="">اختر النوع</option>

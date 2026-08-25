@@ -12,6 +12,11 @@ const jwtSecret = process.env.JWT_SECRET;
 const PASSWORD_RESET_CODE_TTL_MINUTES = 10;
 const PASSWORD_RESET_MAX_ATTEMPTS = 5;
 
+function isPrimaryAdminEmail(email = '') {
+  const primaryAdminEmail = String(process.env.PRIMARY_ADMIN_EMAIL || '').trim().toLowerCase();
+  return Boolean(primaryAdminEmail) && String(email || '').trim().toLowerCase() === primaryAdminEmail;
+}
+
 function normalizeEmail(value = '') {
   return String(value || '').trim().toLowerCase();
 }
@@ -93,9 +98,18 @@ router.post('/login', async (req, res) => {
       { expiresIn: '7d' }
     );
 
-    const permissions = user.role === 'admin'
-      ? (await db.prepare('SELECT key FROM permissions').all()).map(p => p.key)
-      : (await db.prepare('SELECT permission_key FROM user_permissions WHERE user_id = ?').all(user.id)).map(p => p.permission_key);
+    let permissions;
+    if (user.role === 'admin') {
+      const allPermissions = (await db.prepare('SELECT key FROM permissions').all()).map(p => p.key);
+      const revokedPermissions = Array.isArray(user.revoked_permissions)
+        ? user.revoked_permissions
+        : (() => { try { return JSON.parse(user.revoked_permissions || '[]'); } catch (_) { return []; } })();
+      permissions = isPrimaryAdminEmail(user.email)
+        ? allPermissions
+        : allPermissions.filter((key) => !revokedPermissions.includes(key));
+    } else {
+      permissions = (await db.prepare('SELECT permission_key FROM user_permissions WHERE user_id = ?').all(user.id)).map(p => p.permission_key);
+    }
 
     res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, permissions } });
   } catch (err) {

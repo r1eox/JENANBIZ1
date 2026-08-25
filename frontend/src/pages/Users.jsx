@@ -16,6 +16,8 @@ export default function Users() {
   const [selectedIds, setSelectedIds] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [deleteDialog, setDeleteDialog] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   const [editUser, setEditUser] = useState(null);
   const [editForm, setEditForm] = useState({});
@@ -57,13 +59,12 @@ export default function Users() {
 
   const deleteUser = async (id, name) => {
     if (!canManageUsers) return;
-    if (!confirm(`هل أنت متأكد من حذف "${name}"؟`)) return;
-    const res = await authFetch(`/api/admin/users/${id}`, { method: 'DELETE' });
-    if (res.ok) load();
-    else {
-      const data = await res.json();
-      alert(data.error || 'خطأ');
-    }
+    setDeleteDialog({
+      mode: 'single',
+      title: `حذف "${name}"`,
+      description: 'سيتم حذف هذا الحساب من داخل النظام مباشرةً ولن يظهر مرة أخرى في القائمة.',
+      ids: [id],
+    });
   };
 
   const toggleSelection = (id) => {
@@ -206,19 +207,37 @@ export default function Users() {
   const bulkDeleteUsers = async () => {
     if (!canManageUsers) return;
     if (selectedIds.length === 0) return;
-    if (!confirm(`هل أنت متأكد من حذف ${selectedIds.length} مستخدم؟`)) return;
-
-    const res = await authFetch('/api/admin/users/bulk-delete', {
-      method: 'POST',
-      body: JSON.stringify({ ids: selectedIds }),
+    setDeleteDialog({
+      mode: 'bulk',
+      title: 'حذف المستخدمين المحددين',
+      description: `سيتم حذف ${selectedIds.length} حسابًا نهائيًا من النظام.`,
+      ids: [...selectedIds],
     });
-    const data = await res.json();
-    if (!res.ok) {
-      alert(data.error || 'خطأ في الحذف الجماعي');
-      return;
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteDialog || deleteDialog.ids.length === 0) return;
+
+    setDeleting(true);
+    const isBulk = deleteDialog.mode === 'bulk';
+    try {
+      const res = await authFetch(isBulk ? '/api/admin/users/bulk-delete' : `/api/admin/users/${deleteDialog.ids[0]}`, {
+        method: isBulk ? 'POST' : 'DELETE',
+        body: isBulk ? JSON.stringify({ ids: deleteDialog.ids }) : undefined,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'خطأ في الحذف');
+        return;
+      }
+      setDeleteDialog(null);
+      clearSelection();
+      load();
+    } catch (_) {
+      alert('خطأ في الاتصال');
+    } finally {
+      setDeleting(false);
     }
-    clearSelection();
-    load();
   };
 
   const pending = filtered.filter(user => user.status === 'pending');
@@ -703,6 +722,51 @@ export default function Users() {
                 type="button"
                 onClick={() => setPermissionUser(null)}
                 className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm" dir="rtl">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="bg-gradient-to-r from-red-600 to-rose-600 px-6 py-4">
+              <div className="flex items-center gap-3 text-white">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/15">
+                  <Trash2 size={18} />
+                </div>
+                <div>
+                  <h2 className="text-base font-black">تأكيد الحذف</h2>
+                  <p className="text-xs text-white/80">إجراء نهائي داخل صفحة المستخدمين</p>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-4 px-6 py-5">
+              <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+                <div className="font-bold text-red-900">{deleteDialog.title}</div>
+                <div className="mt-1 leading-6">{deleteDialog.description}</div>
+              </div>
+              <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-xs text-gray-500">
+                النافذة هنا داخل التصميم نفسه بدل تنبيه المتصفح التقليدي.
+              </div>
+            </div>
+            <div className="flex gap-3 border-t border-gray-100 px-6 py-4">
+              <button
+                type="button"
+                onClick={confirmDelete}
+                disabled={deleting}
+                className="flex-1 rounded-xl bg-red-600 py-2.5 text-sm font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {deleting ? 'جارٍ الحذف...' : 'نعم، احذف الآن'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setDeleteDialog(null)}
+                disabled={deleting}
+                className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-60"
               >
                 إلغاء
               </button>

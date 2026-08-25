@@ -14,7 +14,7 @@ const navItems = [
   { path: '/attendance-admin',label: 'سجل الحضور',   icon: CalendarDays,    roles: ['admin'], anyPermissions: ['view_attendance_admin', 'delete_attendance_records'] },
   { path: '/performance',     label: 'تحليل الأداء',  icon: TrendingUp,      roles: ['admin'], permission: 'view_performance' },
   { path: '/reports',         label: 'التقارير',        icon: BarChart2,       roles: ['admin'], permission: 'view_reports' },
-  { path: '/eligibility',     label: 'أهلية المنشأة',  icon: ClipboardCheck,  roles: ['admin', 'employee', 'partner'] },
+  { path: '/eligibility',     label: 'أهلية التمويل',  icon: ClipboardCheck,  roles: ['admin', 'employee', 'partner'] },
   { path: '/establishments',  label: 'المنشآت',        icon: Store,           roles: ['admin'], permission: 'manage_establishments' },
   { path: '/brokers',         label: 'الوسطاء',        icon: UserCheck,       roles: ['admin', 'employee'] },
   { path: '/companies',       label: 'جهات التمويل', icon: Building2,       roles: ['admin'], permission: 'manage_funding' },

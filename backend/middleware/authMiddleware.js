@@ -3,6 +3,11 @@ const db = require('../database');
 
 const jwtSecret = process.env.JWT_SECRET;
 
+function isPrimaryAdminEmail(email = '') {
+  const primaryAdminEmail = String(process.env.PRIMARY_ADMIN_EMAIL || '').trim().toLowerCase();
+  return Boolean(primaryAdminEmail) && String(email || '').trim().toLowerCase() === primaryAdminEmail;
+}
+
 const authMiddleware = async (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -23,7 +28,9 @@ const authMiddleware = async (req, res, next) => {
       const revokedPermissions = Array.isArray(user.revoked_permissions)
         ? user.revoked_permissions
         : (() => { try { return JSON.parse(user.revoked_permissions || '[]'); } catch (_) { return []; } })();
-      user.permissions = allPerms.map(p => p.key).filter((key) => !revokedPermissions.includes(key));
+      user.permissions = isPrimaryAdminEmail(user.email)
+        ? allPerms.map(p => p.key)
+        : allPerms.map(p => p.key).filter((key) => !revokedPermissions.includes(key));
     } else {
       const perms = await db.prepare('SELECT permission_key FROM user_permissions WHERE user_id = ?').all(user.id);
       user.permissions = perms.map(p => p.permission_key);
