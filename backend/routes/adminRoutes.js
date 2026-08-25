@@ -170,13 +170,6 @@ router.delete('/users/:id', hasPermission('manage_users'), async (req, res) => {
       return res.status(403).json({ error: 'لا يمكنك حذف حسابك الحالي' });
     }
 
-    if (user.role === 'admin' && !isPrimaryAdmin && requesterCanDeleteAdmins) {
-      const adminCountRow = await db.prepare('SELECT COUNT(*) as count FROM users WHERE role = \'admin\'').get();
-      if (Number(adminCountRow?.count || 0) <= 1) {
-        return res.status(403).json({ error: 'يجب إبقاء مدير واحد على الأقل في النظام' });
-      }
-    }
-
     await db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
     res.json({ message: isPrimaryAdmin ? 'تم حذف الحساب الأساسي بنجاح' : 'تم حذف المستخدم' });
   } catch (err) {
@@ -201,10 +194,6 @@ router.post('/users/bulk-delete', hasPermission('manage_users'), async (req, res
       if (user.role === 'admin' && !requesterCanDeleteAdmins) continue;
       if (Number(id) === Number(req.user.id) && !isPrimaryAdmin) continue;
 
-      if (user.role === 'admin' && !isPrimaryAdmin && requesterCanDeleteAdmins) {
-        const adminCountRow = await db.prepare('SELECT COUNT(*) as count FROM users WHERE role = \'admin\'').get();
-        if (Number(adminCountRow?.count || 0) <= 1) continue;
-      }
       await db.prepare('DELETE FROM users WHERE id = ?').run(id);
       deletedCount += 1;
     }
