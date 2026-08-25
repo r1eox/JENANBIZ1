@@ -37,6 +37,10 @@ function isPrimaryAdminUser(user = {}) {
   return String(user.email).trim().toLowerCase() === primaryAdminEmail;
 }
 
+function canDeleteAdminUsers(user = {}) {
+  return user.role === 'admin' || (Array.isArray(user.permissions) && user.permissions.includes('delete_admins'));
+}
+
 function parseRequestRow(request = null) {
   if (!request) return request;
   return {
@@ -156,11 +160,17 @@ router.delete('/users/:id', hasPermission('manage_users'), async (req, res) => {
     if (!user) return res.status(404).json({ error: 'المستخدم غير موجود' });
 
     const isPrimaryAdmin = isPrimaryAdminUser(user);
+    const requesterCanDeleteAdmins = canDeleteAdminUsers(req.user);
+
+    if (user.role === 'admin' && !requesterCanDeleteAdmins) {
+      return res.status(403).json({ error: 'لا تملك صلاحية حذف الأدمن' });
+    }
+
     if (Number(req.params.id) === Number(req.user.id) && !isPrimaryAdmin) {
       return res.status(403).json({ error: 'لا يمكنك حذف حسابك الحالي' });
     }
 
-    if (user.role === 'admin' && !isPrimaryAdmin) {
+    if (user.role === 'admin' && !isPrimaryAdmin && requesterCanDeleteAdmins) {
       const adminCountRow = await db.prepare('SELECT COUNT(*) as count FROM users WHERE role = \'admin\'').get();
       if (Number(adminCountRow?.count || 0) <= 1) {
         return res.status(403).json({ error: 'يجب إبقاء مدير واحد على الأقل في النظام' });
@@ -181,15 +191,17 @@ router.post('/users/bulk-delete', hasPermission('manage_users'), async (req, res
     if (ids.length === 0) return res.status(400).json({ error: 'لم يتم تحديد مستخدمين للحذف' });
 
     let deletedCount = 0;
+    const requesterCanDeleteAdmins = canDeleteAdminUsers(req.user);
 
     for (const id of ids) {
       const user = await db.prepare('SELECT id, role, email FROM users WHERE id = ?').get(id);
       if (!user) continue;
 
       const isPrimaryAdmin = isPrimaryAdminUser(user);
+      if (user.role === 'admin' && !requesterCanDeleteAdmins) continue;
       if (Number(id) === Number(req.user.id) && !isPrimaryAdmin) continue;
 
-      if (user.role === 'admin' && !isPrimaryAdmin) {
+      if (user.role === 'admin' && !isPrimaryAdmin && requesterCanDeleteAdmins) {
         const adminCountRow = await db.prepare('SELECT COUNT(*) as count FROM users WHERE role = \'admin\'').get();
         if (Number(adminCountRow?.count || 0) <= 1) continue;
       }
@@ -743,6 +755,7 @@ router.post('/permissions/reset', adminMiddleware, async (req, res) => {
       { key: 'approve_users',         label: 'الموافقة على المستخدمين',      description: 'يستطيع تفعيل أو حظر المستخدمين الجدد',         category: 'المستخدمون' },
       { key: 'manage_users',          label: 'إدارة المستخدمين',            description: 'يستطيع إنشاء وتعديل وحذف المستخدمين غير الأدمن', category: 'المستخدمون' },
       { key: 'manage_user_permissions', label: 'إدارة صلاحيات المستخدمين', description: 'يستطيع منح وسحب الصلاحيات للمستخدمين',        category: 'المستخدمون' },
+      { key: 'delete_admins',         label: 'حذف الأدمن',                description: 'يستطيع حذف حسابات الأدمن بما فيها الأدمن الأساسي', category: 'المستخدمون' },
       { key: 'manage_funding',        label: 'إدارة الجهات التمويلية',       description: 'يستطيع إضافة وتعديل وحذف الجهات التمويلية',    category: 'الجهات التمويلية' },
       { key: 'manage_settings',       label: 'الوصول للإعدادات',             description: 'يستطيع تعديل إعدادات المنصة والذكاء الاصطناعي', category: 'الإعدادات' },
       { key: 'manage_establishments', label: 'إدارة المنشآت',               description: 'يستطيع عرض وإضافة وتعديل وحذف المنشآت',        category: 'المنشآت' },
