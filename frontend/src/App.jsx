@@ -19,6 +19,7 @@ import Reports from './pages/Reports';
 import Eligibility from './pages/Eligibility';
 import Commissions from './pages/Commissions';
 import Establishments from './pages/Establishments';
+import Accounting from './pages/Accounting';
 
 class RuntimeRecoveryBoundary extends React.Component {
   constructor(props) {
@@ -117,6 +118,9 @@ function AppRoutes() {
       } />
       <Route path="/commissions" element={
         <PrivateRoute><Layout><Commissions /></Layout></PrivateRoute>
+      } />
+      <Route path="/accounting" element={
+        <PrivateRoute><Layout><Accounting /></Layout></PrivateRoute>
       } />
       <Route path="/establishments" element={
         <PrivateRoute permission="manage_establishments"><Layout><Establishments /></Layout></PrivateRoute>

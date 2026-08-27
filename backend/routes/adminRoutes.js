@@ -1019,6 +1019,18 @@ router.get('/brokers', adminMiddleware, async (req, res) => {
 // ===== CONTRACTS =====
 const multer = require('multer');
 
+const accountingDocumentStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, '../uploads/accounting');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`);
+  }
+});
+const accountingDocumentUpload = multer({ storage: accountingDocumentStorage, limits: { fileSize: 25 * 1024 * 1024 } });
+
 const contractStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     const dir = path.join(__dirname, '../uploads/contracts');
@@ -1091,6 +1103,109 @@ router.post('/requests/:id/upload-funding-contract', adminMiddleware, contractUp
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'خطأ في رفع عقد التمويل' });
+  }
+});
+
+// ===== ACCOUNTING =====
+function toAccountingUrl(filePath = '') {
+  if (!filePath) return '';
+  const normalized = String(filePath).replace(/\\/g, '/');
+  const relative = normalized.includes('/uploads/')
+    ? normalized.split('/uploads/').pop()
+    : path.relative(path.join(__dirname, '../uploads'), normalized).replace(/\\/g, '/');
+  return relative ? `/uploads/${relative.replace(/^\/+/, '')}` : '';
+}
+
+router.get('/accounting/summary', adminMiddleware, async (req, res) => {
+  try {
+    const month = req.query.month || new Date().toISOString().slice(0, 7);
+    const rows = await db.prepare(`SELECT entry_type, amount FROM accounting_entries WHERE entry_month = ?`).all(month);
+    const summary = require('../financial').summarizeMonthlyAccounting(rows.map(row => ({ type: row.entry_type, amount: row.amount })));
+    res.json({ month, summary });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'خطأ في حساب الملخص المالي' });
+  }
+});
+
+router.get('/accounting/entries', adminMiddleware, async (req, res) => {
+  try {
+    const month = req.query.month || new Date().toISOString().slice(0, 7);
+    const entries = await db.prepare(`SELECT * FROM accounting_entries WHERE entry_month = ? ORDER BY created_at DESC`).all(month);
+    const docs = await db.prepare(`SELECT * FROM accounting_documents WHERE entry_month = ? ORDER BY created_at DESC`).all(month);
+    const docsByEntry = Object.fromEntries(docs.map(doc => [String(doc.entry_id), []]));
+    docs.forEach(doc => { if (!docsByEntry[String(doc.entry_id)]) docsByEntry[String(doc.entry_id)] = []; docsByEntry[String(doc.entry_id)].push({ ...doc, url: toAccountingUrl(doc.file_path) }); });
+
+    res.json({
+      month,
+      entries: entries.map(entry => ({
+        ...entry,
+        amount: Number(entry.amount || 0),
+        documents: docsByEntry[String(entry.id)] || [],
+      }))
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'خطأ في استرجاع السجلات المحاسبية' });
+  }
+});
+
+router.post('/accounting/entries', adminMiddleware, async (req, res) => {
+  try {
+    const { entry_type, category, label, vendor_name, amount, entry_month, notes } = req.body || {};
+    const normalizedType = String(entry_type || 'expense').toLowerCase() === 'revenue' ? 'revenue' : 'expense';
+    const normalizedMonth = String(entry_month || new Date().toISOString().slice(0, 7));
+    const numericAmount = Number(amount || 0);
+    if (!label || !label.trim()) return res.status(400).json({ error: 'الوصف مطلوب' });
+    if (!Number.isFinite(numericAmount) || numericAmount < 0) return res.status(400).json({ error: 'المبلغ غير صحيح' });
+
+    const row = await db.prepare(`INSERT INTO accounting_entries (entry_type, category, label, vendor_name, amount, entry_month, notes, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      RETURNING *`).run(normalizedType, category || 'عام', label.trim(), vendor_name || null, numericAmount, normalizedMonth, notes || null, req.user.id);
+
+    const entry = row.lastInsertRowid ? await db.prepare('SELECT * FROM accounting_entries WHERE id = ?').get(row.lastInsertRowid) : null;
+    res.status(201).json({ message: 'تم حفظ السجل المحاسبي', entry: entry || { id: null, entry_type: normalizedType, amount: numericAmount } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'خطأ في حفظ السجل المحاسبي' });
+  }
+});
+
+router.delete('/accounting/entries/:id', adminMiddleware, async (req, res) => {
+  try {
+    const existing = await db.prepare('SELECT * FROM accounting_entries WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'السجل غير موجود' });
+
+    const docs = await db.prepare('SELECT * FROM accounting_documents WHERE entry_id = ?').all(req.params.id);
+    for (const doc of docs) {
+      if (doc.file_path && fs.existsSync(doc.file_path)) fs.unlinkSync(doc.file_path);
+    }
+
+    await db.prepare('DELETE FROM accounting_documents WHERE entry_id = ?').run(req.params.id);
+    await db.prepare('DELETE FROM accounting_entries WHERE id = ?').run(req.params.id);
+    res.json({ message: 'تم حذف السجل المحاسبي' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'خطأ في حذف السجل المحاسبي' });
+  }
+});
+
+router.post('/accounting/entries/:id/documents', adminMiddleware, accountingDocumentUpload.single('file'), async (req, res) => {
+  try {
+    const entry = await db.prepare('SELECT * FROM accounting_entries WHERE id = ?').get(req.params.id);
+    if (!entry) return res.status(404).json({ error: 'السجل غير موجود' });
+    if (!req.file) return res.status(400).json({ error: 'لم يتم رفع أي ملف' });
+
+    const rel = path.relative(path.join(__dirname, '../uploads'), req.file.path).replace(/\\/g, '/');
+    const row = await db.prepare(`INSERT INTO accounting_documents (entry_id, document_type, vendor_name, amount, entry_month, file_path, file_name, uploaded_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      RETURNING *`).run(req.params.id, 'invoice', entry.vendor_name || null, entry.amount || 0, entry.entry_month, req.file.path, req.file.originalname, req.user.id);
+
+    const doc = row.lastInsertRowid ? await db.prepare('SELECT * FROM accounting_documents WHERE id = ?').get(row.lastInsertRowid) : null;
+    res.status(201).json({ message: 'تم رفع الملف بنجاح', document: doc ? { ...doc, url: `/uploads/${rel}` } : null });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'خطأ في رفع الملف' });
   }
 });
 

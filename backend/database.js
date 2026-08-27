@@ -223,6 +223,32 @@ async function initDatabase() {
     uploaded_at TIMESTAMP DEFAULT NOW()
   )`);
 
+  await pool.query(`CREATE TABLE IF NOT EXISTS accounting_entries (
+    id SERIAL PRIMARY KEY,
+    entry_type TEXT NOT NULL DEFAULT 'expense',
+    category TEXT NOT NULL DEFAULT 'عام',
+    label TEXT NOT NULL,
+    vendor_name TEXT,
+    amount REAL NOT NULL DEFAULT 0,
+    entry_month TEXT NOT NULL,
+    notes TEXT,
+    created_by INTEGER,
+    created_at TIMESTAMP DEFAULT NOW()
+  )`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS accounting_documents (
+    id SERIAL PRIMARY KEY,
+    entry_id INTEGER,
+    document_type TEXT NOT NULL DEFAULT 'invoice',
+    vendor_name TEXT,
+    amount REAL DEFAULT 0,
+    entry_month TEXT,
+    file_path TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    uploaded_by INTEGER,
+    created_at TIMESTAMP DEFAULT NOW()
+  )`);
+
   await pool.query(`CREATE TABLE IF NOT EXISTS account_statements (
     id SERIAL PRIMARY KEY,
     request_id INTEGER NOT NULL,
