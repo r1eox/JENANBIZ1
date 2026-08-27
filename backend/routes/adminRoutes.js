@@ -722,7 +722,7 @@ router.get('/stats', adminMiddleware, async (req, res) => {
       db.prepare("SELECT COUNT(*) as c FROM users WHERE status='pending'").get(),
       db.prepare("SELECT COUNT(*) as c FROM requests WHERE status='file_submitted'").get(),
       db.prepare("SELECT COUNT(*) as c FROM requests WHERE status='approved'").get(),
-      db.prepare("SELECT COUNT(*) as c FROM requests WHERE status='fees_received'").get(),
+      db.prepare("SELECT COUNT(*) as c FROM requests WHERE status IN ('transferred','fees_received')").get(),
       db.prepare("SELECT COUNT(*) as c FROM requests WHERE status='missing'").get(),
     ]);
     res.json({ totalRequests: total.c, pendingUsers: pending.c, fileSubmitted: fileSubmitted.c, approved: approved.c, feesReceived: feesReceived.c, missing: missing.c });
@@ -738,7 +738,7 @@ router.get('/employees-with-requests', adminMiddleware, async (req, res) => {
       SELECT u.id as user_id, u.name as user_name, u.phone as user_phone, u.role, u.partner_type,
         COUNT(r.id) as active_requests_count
       FROM users u
-      LEFT JOIN requests r ON u.id = r.user_id AND r.status NOT IN ('approved','fees_received','rejected')
+      LEFT JOIN requests r ON u.id = r.user_id AND r.status NOT IN ('approved','transferred','fees_received','rejected')
       WHERE u.role IN ('employee','partner','company') AND u.status='approved'
       GROUP BY u.id HAVING COUNT(r.id) > 0 ORDER BY u.name
     `).all();
@@ -747,7 +747,7 @@ router.get('/employees-with-requests', adminMiddleware, async (req, res) => {
         SELECT r.id, r.company_name, r.owner_name, r.owner_phone, r.status, r.funding_type, r.updated_at,
           fe.name as funding_entity_name, fe.whatsapp_number as fe_whatsapp
         FROM requests r LEFT JOIN funding_entities fe ON r.funding_entity_id = fe.id
-        WHERE r.user_id = ? AND r.status NOT IN ('approved','fees_received','rejected')
+        WHERE r.user_id = ? AND r.status NOT IN ('approved','transferred','fees_received','rejected')
         ORDER BY r.updated_at DESC
       `).all(emp.user_id);
       return { ...emp, requests };
@@ -1170,10 +1170,10 @@ router.get('/dashboard-stats', adminMiddleware, async (req, res) => {
     const thisYear = now.getFullYear().toString();
 
     const [thisRev, lastRev, ytd, pipelineRow, stages, pendingUsersRow, missingDocsRow, overdueRow] = await Promise.all([
-      db.prepare("SELECT COALESCE(SUM(commission_amount),0) as r, COUNT(*) as c FROM requests WHERE status='fees_received' AND TO_CHAR(updated_at,'YYYY-MM')=?").get(thisMonth),
-      db.prepare("SELECT COALESCE(SUM(commission_amount),0) as r FROM requests WHERE status='fees_received' AND TO_CHAR(updated_at,'YYYY-MM')=?").get(lastMonth),
-      db.prepare("SELECT COALESCE(SUM(commission_amount),0) as r, COUNT(*) as c FROM requests WHERE status='fees_received' AND TO_CHAR(updated_at,'YYYY')=?").get(thisYear),
-      db.prepare("SELECT COALESCE(SUM(commission_amount),0) as r FROM requests WHERE status NOT IN ('fees_received','rejected') AND commission_amount>0").get(),
+      db.prepare("SELECT COALESCE(SUM(COALESCE(net_revenue, commission_amount, 0)),0) as r, COUNT(*) as c FROM requests WHERE status IN ('transferred','fees_received') AND TO_CHAR(updated_at,'YYYY-MM')=?").get(thisMonth),
+      db.prepare("SELECT COALESCE(SUM(COALESCE(net_revenue, commission_amount, 0)),0) as r FROM requests WHERE status IN ('transferred','fees_received') AND TO_CHAR(updated_at,'YYYY-MM')=?").get(lastMonth),
+      db.prepare("SELECT COALESCE(SUM(COALESCE(net_revenue, commission_amount, 0)),0) as r, COUNT(*) as c FROM requests WHERE status IN ('transferred','fees_received') AND TO_CHAR(updated_at,'YYYY')=?").get(thisYear),
+      db.prepare("SELECT COALESCE(SUM(COALESCE(net_revenue, commission_amount, 0)),0) as r FROM requests WHERE status NOT IN ('transferred','fees_received','rejected') AND (COALESCE(net_revenue, commission_amount, 0)>0)").get(),
       db.prepare("SELECT status, COUNT(*) as count FROM requests GROUP BY status ORDER BY count DESC").all(),
       db.prepare("SELECT COUNT(*) as c FROM users WHERE status='pending'").get(),
       db.prepare("SELECT COUNT(*) as c FROM requests WHERE status='missing'").get(),
@@ -1185,7 +1185,7 @@ router.get('/dashboard-stats', adminMiddleware, async (req, res) => {
     const topPerformers = await db.prepare(`
       SELECT u.id, u.name, u.role, COUNT(r.id) as total,
         SUM(CASE WHEN r.status IN ('approved','transferred','fees_received') THEN 1 ELSE 0 END) as approved,
-        COALESCE(SUM(CASE WHEN r.status='fees_received' THEN r.commission_amount ELSE 0 END),0) as revenue
+        COALESCE(SUM(CASE WHEN r.status IN ('transferred','fees_received') THEN COALESCE(r.net_revenue, r.commission_amount, 0) ELSE 0 END),0) as revenue
       FROM users u LEFT JOIN requests r ON u.id=r.user_id AND TO_CHAR(r.created_at,'YYYY-MM')=?
       WHERE u.role IN ('employee','partner') AND u.status='approved'
       GROUP BY u.id ORDER BY approved DESC, total DESC LIMIT 5
@@ -1196,7 +1196,7 @@ router.get('/dashboard-stats', adminMiddleware, async (req, res) => {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const m = d.toISOString().slice(0, 7);
       const [rev, newR] = await Promise.all([
-        db.prepare("SELECT COALESCE(SUM(commission_amount),0) as r, COUNT(*) as c FROM requests WHERE status='fees_received' AND TO_CHAR(updated_at,'YYYY-MM')=?").get(m),
+        db.prepare("SELECT COALESCE(SUM(COALESCE(net_revenue, commission_amount, 0)),0) as r, COUNT(*) as c FROM requests WHERE status IN ('transferred','fees_received') AND TO_CHAR(updated_at,'YYYY-MM')=?").get(m),
         db.prepare("SELECT COUNT(*) as c FROM requests WHERE TO_CHAR(created_at,'YYYY-MM')=?").get(m),
       ]);
       monthlyTrend.push({ month: m, revenue: rev.r, closed: rev.c, new_requests: newR.c });
@@ -1204,7 +1204,7 @@ router.get('/dashboard-stats', adminMiddleware, async (req, res) => {
 
     const [teamTarget, teamActuals, recentRequests] = await Promise.all([
       db.prepare("SELECT COALESCE(SUM(target_requests),0) as tr, COALESCE(SUM(target_approved),0) as ta, COALESCE(SUM(target_revenue),0) as rv FROM targets WHERE month=?").get(thisMonth),
-      db.prepare("SELECT COUNT(*) as tr, SUM(CASE WHEN status IN ('approved','transferred','fees_received') THEN 1 ELSE 0 END) as ta, COALESCE(SUM(CASE WHEN status='fees_received' THEN commission_amount ELSE 0 END),0) as rv FROM requests WHERE TO_CHAR(created_at,'YYYY-MM')=?").get(thisMonth),
+      db.prepare("SELECT COUNT(*) as tr, SUM(CASE WHEN status IN ('approved','transferred','fees_received') THEN 1 ELSE 0 END) as ta, COALESCE(SUM(CASE WHEN status IN ('transferred','fees_received') THEN COALESCE(net_revenue, commission_amount, 0) ELSE 0 END),0) as rv FROM requests WHERE TO_CHAR(created_at,'YYYY-MM')=?").get(thisMonth),
       db.prepare(`SELECT r.id, r.company_name, r.status, r.funding_type, r.updated_at, r.commission_amount,
         u.name as user_name, fe.name as entity_name
         FROM requests r LEFT JOIN users u ON r.user_id=u.id LEFT JOIN funding_entities fe ON r.funding_entity_id=fe.id
@@ -1234,7 +1234,7 @@ router.get('/reports', hasPermission('view_reports'), async (req, res) => {
     for (let m = 1; m <= 12; m++) {
       const month = `${year}-${String(m).padStart(2, '0')}`;
       const [closed, newR, approved] = await Promise.all([
-        db.prepare("SELECT COUNT(*) as c, COALESCE(SUM(commission_amount),0) as r FROM requests WHERE status='fees_received' AND TO_CHAR(updated_at,'YYYY-MM')=?").get(month),
+        db.prepare("SELECT COUNT(*) as c, COALESCE(SUM(COALESCE(net_revenue, commission_amount, 0)),0) as r FROM requests WHERE status IN ('transferred','fees_received') AND TO_CHAR(updated_at,'YYYY-MM')=?").get(month),
         db.prepare("SELECT COUNT(*) as c FROM requests WHERE TO_CHAR(created_at,'YYYY-MM')=?").get(month),
         db.prepare("SELECT COUNT(*) as c FROM requests WHERE status IN ('approved','transferred','fees_received') AND TO_CHAR(updated_at,'YYYY-MM')=?").get(month),
       ]);
@@ -1244,19 +1244,19 @@ router.get('/reports', hasPermission('view_reports'), async (req, res) => {
       db.prepare("SELECT status, COUNT(*) as count FROM requests GROUP BY status ORDER BY count DESC").all(),
       db.prepare(`SELECT fe.name, COUNT(r.id) as total_sent,
         SUM(CASE WHEN r.status IN ('approved','transferred','fees_received') THEN 1 ELSE 0 END) as approved,
-        COALESCE(SUM(CASE WHEN r.status='fees_received' THEN r.commission_amount ELSE 0 END),0) as revenue
+        COALESCE(SUM(CASE WHEN r.status IN ('transferred','fees_received') THEN COALESCE(r.net_revenue, r.commission_amount, 0) ELSE 0 END),0) as revenue
         FROM funding_entities fe LEFT JOIN requests r ON r.funding_entity_id=fe.id
         GROUP BY fe.id HAVING COUNT(r.id)>0 ORDER BY approved DESC LIMIT 10`).all(),
       db.prepare(`SELECT u.name, u.role, COUNT(r.id) as total,
         SUM(CASE WHEN r.status IN ('approved','transferred','fees_received') THEN 1 ELSE 0 END) as approved,
         SUM(CASE WHEN r.status='rejected' THEN 1 ELSE 0 END) as rejected,
-        COALESCE(SUM(CASE WHEN r.status='fees_received' THEN r.commission_amount ELSE 0 END),0) as revenue
+        COALESCE(SUM(CASE WHEN r.status IN ('transferred','fees_received') THEN COALESCE(r.net_revenue, r.commission_amount, 0) ELSE 0 END),0) as revenue
         FROM users u LEFT JOIN requests r ON u.id=r.user_id AND TO_CHAR(r.created_at,'YYYY')=?
         WHERE u.role IN ('employee','partner') GROUP BY u.id ORDER BY approved DESC, total DESC LIMIT 10`).all(year),
-      db.prepare(`SELECT r.id, r.company_name, r.funding_type, r.commission_amount, r.updated_at,
+      db.prepare(`SELECT r.id, r.company_name, r.funding_type, COALESCE(r.net_revenue, r.commission_amount, 0) as commission_amount, r.updated_at,
         u.name as user_name, fe.name as entity_name
         FROM requests r LEFT JOIN users u ON r.user_id=u.id LEFT JOIN funding_entities fe ON r.funding_entity_id=fe.id
-        WHERE r.status='fees_received' AND TO_CHAR(r.updated_at,'YYYY')=? ORDER BY r.updated_at DESC`).all(year),
+        WHERE r.status IN ('transferred','fees_received') AND TO_CHAR(r.updated_at,'YYYY')=? ORDER BY r.updated_at DESC`).all(year),
     ]);
     res.json({ monthly, funnel, entities, top_users: topUsers, closed_deals: closedDeals });
   } catch (err) {
@@ -1275,7 +1275,7 @@ router.get('/targets', adminMiddleware, async (req, res) => {
         db.prepare('SELECT * FROM targets WHERE user_id=? AND month=?').get(u.id, month),
         db.prepare(`SELECT COUNT(*) as requests,
           SUM(CASE WHEN status IN ('approved','transferred','fees_received') THEN 1 ELSE 0 END) as approved,
-          COALESCE(SUM(CASE WHEN status='fees_received' THEN commission_amount ELSE 0 END),0) as revenue
+          COALESCE(SUM(CASE WHEN status IN ('transferred','fees_received') THEN COALESCE(net_revenue, commission_amount, 0) ELSE 0 END),0) as revenue
           FROM requests WHERE user_id=? AND TO_CHAR(created_at,'YYYY-MM')=?`).get(u.id, month),
       ]);
       return { ...u, target: target || { target_requests: 0, target_approved: 0, target_revenue: 0 }, actual };
@@ -1321,10 +1321,63 @@ router.delete('/targets/:userId/:month', adminMiddleware, async (req, res) => {
 
 router.put('/requests/:id/commission', adminMiddleware, async (req, res) => {
   try {
-    const amount = parseFloat(req.body.commission_amount);
-    if (isNaN(amount) || amount < 0) return res.status(400).json({ error: 'مبلغ غير صالح' });
-    await db.prepare('UPDATE requests SET commission_amount=? WHERE id=?').run(amount, req.params.id);
-    res.json({ message: 'تم تحديث العمولة', commission_amount: amount });
+    const fundingAmount = Number(req.body.funding_amount ?? req.body.total_funding_amount ?? req.body.amount ?? 0);
+    const operatingExpenses = Number(req.body.operating_expenses ?? req.body.operating_expense ?? 0);
+    const netRevenue = Number(req.body.net_revenue ?? ((fundingAmount || 0) - (operatingExpenses || 0)) ?? 0);
+    const explicitCommission = Number(req.body.commission_amount ?? req.body.revenue ?? 0);
+    const safeFundingAmount = Number.isFinite(fundingAmount) ? Math.max(0, fundingAmount) : 0;
+    const safeOperatingExpenses = Number.isFinite(operatingExpenses) ? Math.max(0, operatingExpenses) : 0;
+    const safeNetRevenue = Number.isFinite(netRevenue) ? Math.max(0, netRevenue) : 0;
+    const finalCommission = Number.isFinite(explicitCommission) && explicitCommission > 0
+      ? Math.max(0, explicitCommission)
+      : safeNetRevenue;
+
+    await db.prepare(`UPDATE requests SET
+      funding_amount = ?,
+      operating_expenses = ?,
+      net_revenue = ?,
+      commission_amount = ?
+      WHERE id = ?`).run(safeFundingAmount, safeOperatingExpenses, safeNetRevenue, finalCommission, req.params.id);
+
+    res.json({
+      message: 'تم تحديث البيانات المالية',
+      funding_amount: safeFundingAmount,
+      operating_expenses: safeOperatingExpenses,
+      net_revenue: safeNetRevenue,
+      commission_amount: finalCommission,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/requests/:id/financials', adminMiddleware, async (req, res) => {
+  try {
+    const fundingAmount = Number(req.body.funding_amount ?? 0);
+    const operatingExpenses = Number(req.body.operating_expenses ?? 0);
+    const safeFundingAmount = Number.isFinite(fundingAmount) ? Math.max(0, fundingAmount) : 0;
+    const safeOperatingExpenses = Number.isFinite(operatingExpenses) ? Math.max(0, operatingExpenses) : 0;
+    const safeNetRevenue = Math.max(0, safeFundingAmount - safeOperatingExpenses);
+    const commissionAmount = Number.isFinite(Number(req.body.commission_amount)) && Number(req.body.commission_amount) > 0
+      ? Math.max(0, Number(req.body.commission_amount))
+      : safeNetRevenue;
+
+    await db.prepare(`UPDATE requests SET
+      funding_amount = ?,
+      operating_expenses = ?,
+      net_revenue = ?,
+      commission_amount = ?,
+      updated_at = NOW()
+      WHERE id = ?`).run(safeFundingAmount, safeOperatingExpenses, safeNetRevenue, commissionAmount, req.params.id);
+
+    res.json({
+      message: 'تم حفظ البيانات المالية',
+      funding_amount: safeFundingAmount,
+      operating_expenses: safeOperatingExpenses,
+      net_revenue: safeNetRevenue,
+      commission_amount: commissionAmount,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });

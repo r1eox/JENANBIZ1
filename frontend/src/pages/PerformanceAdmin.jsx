@@ -606,6 +606,12 @@ export default function PerformanceAdmin() {
                     const ed  = editTargets[uid] || {};
                     const act = row.actual || {};
                     const isSaving = savingTargets[uid];
+                    const reqTarget = Number(ed.target_requests || 0);
+                    const approvedTarget = Number(ed.target_approved || 0);
+                    const revenueTarget = Number(ed.target_revenue || 0);
+                    const reqPct = reqTarget > 0 ? Math.min(100, Math.round(((act.total ?? 0) / reqTarget) * 100)) : 0;
+                    const approvedPct = approvedTarget > 0 ? Math.min(100, Math.round(((act.approved ?? 0) / approvedTarget) * 100)) : 0;
+                    const revenuePct = revenueTarget > 0 ? Math.min(100, Math.round(((act.revenue ?? 0) / revenueTarget) * 100)) : 0;
                     return (
                       <tr key={uid} className="hover:bg-blue-50/20">
                         <td className="px-5 py-4">
@@ -625,9 +631,12 @@ export default function PerformanceAdmin() {
                             className="w-20 border border-gray-200 rounded-lg px-2 py-1.5 text-center text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
                         </td>
                         <td className="px-4 py-4 text-center">
-                          <span className={`font-bold ${(act.total??0) >= (ed.target_requests||0) && (ed.target_requests||0) > 0 ? 'text-green-600' : 'text-gray-700'}`}>
-                            {act.total ?? 0}
-                          </span>
+                          <div className="flex flex-col items-center gap-1">
+                            <span className={`font-bold ${(act.total??0) >= reqTarget && reqTarget > 0 ? 'text-green-600' : 'text-gray-700'}`}>
+                              {act.total ?? 0}
+                            </span>
+                            {reqTarget > 0 && <span className="text-[10px] text-gray-500">{reqPct}%</span>}
+                          </div>
                         </td>
                         <td className="px-4 py-4 text-center">
                           <input type="number" min="0" value={ed.target_approved ?? 0}
@@ -635,9 +644,12 @@ export default function PerformanceAdmin() {
                             className="w-20 border border-gray-200 rounded-lg px-2 py-1.5 text-center text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
                         </td>
                         <td className="px-4 py-4 text-center">
-                          <span className={`font-bold ${(act.approved??0) >= (ed.target_approved||0) && (ed.target_approved||0) > 0 ? 'text-green-600' : 'text-gray-700'}`}>
-                            {act.approved ?? 0}
-                          </span>
+                          <div className="flex flex-col items-center gap-1">
+                            <span className={`font-bold ${(act.approved??0) >= approvedTarget && approvedTarget > 0 ? 'text-green-600' : 'text-gray-700'}`}>
+                              {act.approved ?? 0}
+                            </span>
+                            {approvedTarget > 0 && <span className="text-[10px] text-gray-500">{approvedPct}%</span>}
+                          </div>
                         </td>
                         <td className="px-4 py-4 text-center">
                           <input type="number" min="0" value={ed.target_revenue ?? 0}
@@ -645,9 +657,12 @@ export default function PerformanceAdmin() {
                             className="w-28 border border-gray-200 rounded-lg px-2 py-1.5 text-center text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
                         </td>
                         <td className="px-4 py-4 text-center">
-                          <span className={`font-bold ${(act.revenue??0) >= (ed.target_revenue||0) && (ed.target_revenue||0) > 0 ? 'text-green-600' : 'text-gray-700'}`}>
-                            {(act.revenue ?? 0).toLocaleString('ar-SA')}
-                          </span>
+                          <div className="flex flex-col items-center gap-1">
+                            <span className={`font-bold ${(act.revenue??0) >= revenueTarget && revenueTarget > 0 ? 'text-green-600' : 'text-gray-700'}`}>
+                              {(act.revenue ?? 0).toLocaleString('ar-SA')}
+                            </span>
+                            {revenueTarget > 0 && <span className="text-[10px] text-gray-500">{revenuePct}%</span>}
+                          </div>
                         </td>
                         <td className="px-4 py-4 text-center">
                           <button onClick={() => saveTarget(uid)} disabled={isSaving}

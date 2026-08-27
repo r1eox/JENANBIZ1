@@ -111,6 +111,21 @@ function Progress({ value, max, label, color = 'bg-blue-500' }) {
   );
 }
 
+function GoalProgress({ value, max, label, formatValue = v => v, color = 'bg-blue-500' }) {
+  const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
+  return (
+    <div>
+      <div className="flex justify-between text-xs text-gray-500 mb-1">
+        <span>{label}</span>
+        <span className="font-semibold">{formatValue(value)} / {formatValue(max)} <span className="text-gray-400">({pct}%)</span></span>
+      </div>
+      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full transition-all ${color} ${pct >= 100 ? 'bg-emerald-500' : ''}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // ADMIN DASHBOARD
 // ════════════════════════════════════════════════════════════════════════════
@@ -298,14 +313,15 @@ function EmployeeDashboard({ user, requests, authFetch }) {
   const month = new Date().toISOString().slice(0, 7);
 
   useEffect(() => {
+    if (!user?.id) return;
     authFetch(`/api/admin/targets?month=${month}`)
       .then(r => r.ok ? r.json() : [])
       .then(data => {
-        const t = Array.isArray(data) ? data.find(d => d.id === user?.id) : null;
+        const t = Array.isArray(data) ? data.find(d => d.id === user.id) : null;
         setMyTarget(t || null);
       })
       .catch(() => {});
-  }, [user]);
+  }, [authFetch, user, month]);
 
   const total    = requests.length;
   const approved = requests.filter(r => ['approved','transferred','fees_received'].includes(r.status)).length;
@@ -329,7 +345,7 @@ function EmployeeDashboard({ user, requests, authFetch }) {
       </div>
 
       {/* My Target Progress */}
-      {myTarget && (myTarget.target?.target_requests > 0 || myTarget.target?.target_approved > 0) && (
+      {myTarget && (myTarget.target?.target_requests > 0 || myTarget.target?.target_approved > 0 || myTarget.target?.target_revenue > 0) && (
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
           <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
             <Target size={16} className="text-blue-500" />هدفي هذا الشهر
@@ -337,6 +353,15 @@ function EmployeeDashboard({ user, requests, authFetch }) {
           <div className="space-y-3">
             {myTarget.target.target_requests > 0 && <Progress value={myTarget.actual?.requests || 0} max={myTarget.target.target_requests} label="طلبات جديدة" color="bg-blue-500" />}
             {myTarget.target.target_approved > 0  && <Progress value={myTarget.actual?.approved  || 0} max={myTarget.target.target_approved}  label="طلبات معتمدة" color="bg-green-500" />}
+            {myTarget.target.target_revenue > 0 && (
+              <GoalProgress
+                value={myTarget.actual?.revenue || 0}
+                max={myTarget.target.target_revenue}
+                label="إيرادات مستهدفة"
+                color="bg-emerald-500"
+                formatValue={v => `${Number(v).toLocaleString('ar-SA', { maximumFractionDigits: 0 })} ر.س`}
+              />
+            )}
           </div>
         </div>
       )}

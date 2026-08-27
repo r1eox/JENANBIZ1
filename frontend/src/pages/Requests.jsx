@@ -64,6 +64,40 @@ function getWhatsAppUrl(phone) {
   return `https://wa.me/${normalized}`;
 }
 
+function DisplayNameOrCount({ value, fallback = '—' }) {
+  const [open, setOpen] = useState(false);
+  const items = Array.isArray(value)
+    ? value.filter(Boolean)
+    : typeof value === 'string' && value.trim()
+      ? [value.trim()]
+      : [];
+
+  if (items.length === 0) return <span className="text-gray-400">{fallback}</span>;
+  if (items.length === 1) return <span>{items[0]}</span>;
+
+  return (
+    <div className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-1 text-xs font-bold text-blue-700 shadow-sm ring-1 ring-blue-200"
+      >
+        {items.length}
+        <ChevronDown size={12} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-20 mt-2 min-w-[180px] rounded-xl border border-gray-200 bg-white p-2 shadow-xl">
+          {items.map((name, index) => (
+            <div key={`${name}-${index}`} className="rounded-lg px-2 py-1.5 text-xs text-gray-700 hover:bg-gray-50">
+              {name}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function createInitialProductDetails(fundingType = 'نقاط بيع') {
   switch (fundingType) {
     case 'إقرارات ضريبية':
@@ -132,6 +166,37 @@ function createInitialNewForm() {
     referred_by_id: '',
     product_details: createInitialProductDetails('نقاط بيع'),
   };
+}
+
+function applyCurrentUserDefaults(form = {}, user = null) {
+  const userName = String(user?.name || '').trim();
+  if (!userName) return form;
+
+  const fundingType = String(form.funding_type || '').trim();
+  const nextForm = {
+    ...createInitialNewForm(),
+    ...form,
+    product_details: {
+      ...createInitialProductDetails(fundingType),
+      ...(form.product_details || {}),
+    },
+  };
+
+  if (fundingType === 'تمويل شخصي') {
+    nextForm.product_details.employee_name = nextForm.product_details.employee_name || userName;
+    nextForm.company_name = nextForm.company_name || userName;
+    nextForm.owner_name = nextForm.owner_name || userName;
+    return nextForm;
+  }
+
+  if (['عقار', 'رهن'].includes(fundingType) && normalizeApplicantCategory(nextForm.product_details.applicant_category) !== 'مالك منشأة') {
+    nextForm.product_details.applicant_name = nextForm.product_details.applicant_name || userName;
+    nextForm.company_name = nextForm.company_name || userName;
+    nextForm.owner_name = nextForm.owner_name || userName;
+    return nextForm;
+  }
+
+  return nextForm;
 }
 
 function mergeProductDetailsForFundingType(fundingType, currentDetails = {}) {
@@ -833,6 +898,7 @@ export default function Requests() {
   const [reviewAccountFiles, setReviewAccountFiles] = useState([]);
   const [reviewTaxFiles, setReviewTaxFiles] = useState([]);
   const [uploadingReview, setUploadingReview] = useState(false);
+  const [savingFinancials, setSavingFinancials] = useState(false);
 
   const resetNewFlow = () => {
     setShowNew(false);
@@ -842,7 +908,7 @@ export default function Requests() {
     setUploadBankFiles([]);
     setUploadAccountFiles([]);
     setUploadTaxFiles([]);
-    setNewForm(createInitialNewForm());
+    setNewForm(applyCurrentUserDefaults(createInitialNewForm(), user));
   };
 
   const fetchUserRequestDetails = async (requestId) => {
@@ -1027,7 +1093,7 @@ export default function Requests() {
     setUploadBankFiles([]);
     setUploadAccountFiles([]);
     setUploadTaxFiles([]);
-    setNewForm(createInitialNewForm());
+    setNewForm(applyCurrentUserDefaults(createInitialNewForm(), user));
     setShowNew(true);
   };
 
@@ -1526,7 +1592,11 @@ export default function Requests() {
                     <label className="block text-xs font-semibold text-gray-600 mb-2">نوع التمويل</label>
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                       {FUNDING_TYPES.map(t => (
-                        <button key={t} type="button" onClick={() => setNewForm((current) => ({ ...current, funding_type: t, product_details: mergeProductDetailsForFundingType(t, current.product_details) }))} className={`px-2 py-2 rounded-lg text-xs font-medium text-center transition-colors ${newForm.funding_type === t ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{t}</button>
+                        <button key={t} type="button" onClick={() => setNewForm((current) => applyCurrentUserDefaults({
+                          ...current,
+                          funding_type: t,
+                          product_details: mergeProductDetailsForFundingType(t, current.product_details),
+                        }, user))} className={`px-2 py-2 rounded-lg text-xs font-medium text-center transition-colors ${newForm.funding_type === t ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{t}</button>
                       ))}
                     </div>
                   </div>
@@ -1721,11 +1791,20 @@ export default function Requests() {
                     { icon: Phone, label: 'جوال المالك', val: reviewData.owner_phone },
                     { icon: FileText, label: 'نوع التمويل', val: reviewData.funding_type },
                     { icon: User, label: 'رفع بواسطة', val: reviewData.user_name },
-                    { icon: Building2, label: 'الجهة التمويلية', val: reviewData.funding_entity_name || 'لم تحدد' },
+                    { icon: Building2, label: 'الجهة التمويلية', val: Array.isArray(reviewData.funding_entity_names) ? reviewData.funding_entity_names : (reviewData.funding_entity_name ? [reviewData.funding_entity_name] : []) },
                   ].map(({ icon: Icon, label, val }) => (
                     <div key={label} className="bg-gray-50 rounded-xl p-3 flex items-start gap-2.5">
                       <div className="w-7 h-7 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0 mt-0.5"><Icon size={14} className="text-blue-600" /></div>
-                      <div><div className="text-xs text-gray-400">{label}</div><div className="font-semibold text-gray-800 text-sm">{val || '—'}</div></div>
+                      <div>
+                        <div className="text-xs text-gray-400">{label}</div>
+                        <div className="font-semibold text-gray-800 text-sm">
+                          {label === 'الجهة التمويلية' ? (
+                            <DisplayNameOrCount value={val} fallback="لم تحدد" />
+                          ) : (
+                            <>{val || '—'}</>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1735,6 +1814,56 @@ export default function Requests() {
                     {(STATUS_MAP[reviewData.status] || {}).label || reviewData.status}
                   </span>
                 </div>
+                {isAdmin && (
+                  <div className="border border-emerald-200 rounded-2xl bg-emerald-50/60 p-4">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <h3 className="font-bold text-emerald-800 text-sm">البيانات المالية</h3>
+                      <button
+                        type="button"
+                        onClick={saveFinancials}
+                        disabled={savingFinancials}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 disabled:opacity-60"
+                      >
+                        {savingFinancials ? 'جارٍ الحفظ...' : 'حفظ البيانات'}
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <label className="text-xs text-gray-600">
+                        <span className="block mb-1 font-semibold">مبلغ التمويل</span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={reviewData.funding_amount ?? 0}
+                          onChange={(e) => setReviewData((current) => ({ ...current, funding_amount: Number(e.target.value || 0) }))}
+                          className="w-full border border-emerald-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                        />
+                      </label>
+                      <label className="text-xs text-gray-600">
+                        <span className="block mb-1 font-semibold">المصاريف التشغيلية</span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={reviewData.operating_expenses ?? 0}
+                          onChange={(e) => setReviewData((current) => ({ ...current, operating_expenses: Number(e.target.value || 0) }))}
+                          className="w-full border border-emerald-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                        />
+                      </label>
+                      <label className="text-xs text-gray-600">
+                        <span className="block mb-1 font-semibold">صافي الإيرادات</span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={Number(reviewData.funding_amount || 0) - Number(reviewData.operating_expenses || 0)}
+                          readOnly
+                          className="w-full border border-emerald-200 rounded-xl px-3 py-2 bg-gray-100 text-gray-700"
+                        />
+                      </label>
+                    </div>
+                    <div className="mt-3 text-xs text-emerald-700 font-semibold">
+                      صافي الإيرادات = مبلغ التمويل - المصاريف التشغيلية
+                    </div>
+                  </div>
+                )}
                 {reviewData.bank_statements?.length > 0 && (
                   <div>
                     <h3 className="font-bold text-gray-700 text-sm mb-2">الكشوفات البنكية ({reviewData.bank_statements.length})</h3>

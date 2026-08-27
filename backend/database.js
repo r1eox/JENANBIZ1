@@ -176,6 +176,9 @@ async function initDatabase() {
     total_transfer REAL DEFAULT 0,
     statement_months INTEGER DEFAULT 0,
     notes TEXT,
+    funding_amount REAL DEFAULT 0,
+    operating_expenses REAL DEFAULT 0,
+    net_revenue REAL DEFAULT 0,
     commission_amount REAL DEFAULT 0,
     referred_by_id INTEGER,
     complete_file_path TEXT,
@@ -188,6 +191,11 @@ async function initDatabase() {
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
   )`);
+
+  await pool.query(`ALTER TABLE requests ADD COLUMN IF NOT EXISTS funding_amount REAL DEFAULT 0`);
+  await pool.query(`ALTER TABLE requests ADD COLUMN IF NOT EXISTS operating_expenses REAL DEFAULT 0`);
+  await pool.query(`ALTER TABLE requests ADD COLUMN IF NOT EXISTS net_revenue REAL DEFAULT 0`);
+  await pool.query(`ALTER TABLE requests ADD COLUMN IF NOT EXISTS commission_amount REAL DEFAULT 0`);
 
   await pool.query(`CREATE TABLE IF NOT EXISTS companies (
     id SERIAL PRIMARY KEY,
