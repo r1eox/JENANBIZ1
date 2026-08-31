@@ -1200,6 +1200,46 @@ export default function Requests() {
     setReviewData(res.ok ? await res.json() : null);
   };
 
+  const saveFinancials = async () => {
+    if (!reviewReq || !reviewData) return;
+
+    setSavingFinancials(true);
+    const payload = {
+      funding_amount: Number(reviewData.funding_amount ?? 0),
+      operating_expenses: Number(reviewData.operating_expenses ?? 0),
+      net_revenue: Number(reviewData.net_revenue ?? (Number(reviewData.funding_amount ?? 0) - Number(reviewData.operating_expenses ?? 0))),
+      commission_amount: Number(reviewData.commission_amount ?? 0),
+    };
+
+    try {
+      const res = await authFetch(`/api/admin/requests/${reviewReq.id}/financials`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'تعذر حفظ البيانات المالية');
+        return;
+      }
+
+      setReviewData((current) => ({
+        ...current,
+        funding_amount: data.funding_amount ?? current?.funding_amount ?? 0,
+        operating_expenses: data.operating_expenses ?? current?.operating_expenses ?? 0,
+        net_revenue: data.net_revenue ?? current?.net_revenue ?? 0,
+        commission_amount: data.commission_amount ?? current?.commission_amount ?? 0,
+      }));
+      await load();
+      alert('تم حفظ البيانات المالية بنجاح');
+    } catch (error) {
+      console.error('saveFinancials error:', error);
+      alert('تعذر حفظ البيانات المالية');
+    } finally {
+      setSavingFinancials(false);
+    }
+  };
+
   const closeReview = () => {
     setReviewReq(null);
     setReviewData(null);
