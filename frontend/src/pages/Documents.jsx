@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { FileText, Send, Mail, Plus, TrendingUp, BarChart3, Download, Eye, CheckCircle, Clock3, Printer, ExternalLink } from 'lucide-react';
+import { FileText, Send, Mail, Plus, TrendingUp, BarChart3, Download, Eye, CheckCircle, Clock3, Printer, ExternalLink, Upload, Archive, Building2 } from 'lucide-react';
 
 const DOC_TYPES = [
   { value: 'invoice', label: 'فاتورة' },
@@ -19,6 +19,9 @@ export default function Documents() {
   const [documents, setDocuments] = useState([]);
   const [selectedRequestId, setSelectedRequestId] = useState('');
   const [requests, setRequests] = useState([]);
+  const [requestDetail, setRequestDetail] = useState(null);
+  const [fundingEntities, setFundingEntities] = useState([]);
+  const [selectedFundingEntityId, setSelectedFundingEntityId] = useState('');
   const [selectedDocId, setSelectedDocId] = useState(null);
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [summary, setSummary] = useState({
@@ -80,6 +83,38 @@ export default function Documents() {
   useEffect(() => {
     loadData(month);
   }, [month]);
+
+  useEffect(() => {
+    if (!selectedRequestId) {
+      setRequestDetail(null);
+      return;
+    }
+
+    const loadRequest = async () => {
+      try {
+        const res = await authFetch(`/api/admin/requests/${selectedRequestId}`);
+        if (!res.ok) throw new Error('فشل في تحميل تفاصيل الطلب');
+        const data = await res.json();
+        setRequestDetail(data);
+      } catch (err) {
+        setError(err.message || 'حدث خطأ في تحميل تفاصيل الطلب');
+      }
+    };
+
+    loadRequest();
+  }, [selectedRequestId, authFetch]);
+
+  useEffect(() => {
+    const loadEntities = async () => {
+      try {
+        const res = await authFetch('/api/admin/funding-entities');
+        if (!res.ok) return;
+        const data = await res.json();
+        setFundingEntities(Array.isArray(data) ? data : []);
+      } catch (_) {}
+    };
+    loadEntities();
+  }, [authFetch]);
 
   const openDocumentDetail = async (id) => {
     try {
@@ -160,6 +195,75 @@ export default function Documents() {
     }
   };
 
+  const uploadRequestDocumentFiles = async (docId, files) => {
+    if (!selectedRequestId || !files || files.length === 0) return;
+    const formData = new FormData();
+    Array.from(files).forEach((file) => formData.append('files', file));
+
+    try {
+      const res = await authFetch(`/api/requests/${selectedRequestId}/documents/${docId}/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'فشل في رفع الملفات');
+      setError('');
+      const next = await authFetch(`/api/admin/requests/${selectedRequestId}`);
+      if (next.ok) {
+        setRequestDetail(await next.json());
+      }
+      alert(data.message || 'تم رفع المستند بنجاح');
+    } catch (err) {
+      setError(err.message || 'حدث خطأ أثناء رفع الملف');
+    }
+  };
+
+  const createRequestPackage = async () => {
+    if (!selectedRequestId) {
+      setError('اختر طلباً أولاً');
+      return;
+    }
+
+    try {
+      const formData = new FormData();
+      const res = await authFetch(`/api/requests/${selectedRequestId}/submit-file`, {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'فشل في تجميع الملف');
+      setError('');
+      const next = await authFetch(`/api/admin/requests/${selectedRequestId}`);
+      if (next.ok) {
+        setRequestDetail(await next.json());
+      }
+      alert(data.message || 'تم تجميع الملف المضغوط بنجاح');
+    } catch (err) {
+      setError(err.message || 'حدث خطأ أثناء تجميع الملف');
+    }
+  };
+
+  const sendPackageToFunding = async () => {
+    if (!selectedRequestId || !selectedFundingEntityId) {
+      setError('اختر طلباً وجهة تمويلية أولاً');
+      return;
+    }
+
+    try {
+      const res = await authFetch(`/api/admin/requests/${selectedRequestId}/assign-funding`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ funding_entity_id: selectedFundingEntityId, note: 'تم إرسال الملف المضغوط بعد المراجعة' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'فشل في إرسال الملف للجهة');
+      if (data.whatsapp_url) window.open(data.whatsapp_url, '_blank', 'noopener,noreferrer');
+      alert(data.message || 'تم إرسال الملف للجهة التمويلية');
+    } catch (err) {
+      setError(err.message || 'حدث خطأ أثناء إرسال الملف');
+    }
+  };
+
   const totalCards = useMemo(() => [
     { label: 'عدد المستندات', value: summary.total_documents, icon: FileText, color: 'from-sky-500 to-blue-600' },
     { label: 'الفواتير', value: summary.invoice_count, icon: FileText, color: 'from-emerald-500 to-green-600' },
@@ -200,6 +304,72 @@ export default function Documents() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="mb-4 flex items-center gap-2 text-lg font-black text-slate-800"><Upload size={18} className="text-blue-600" />رفع مستندات الطلب</h2>
+
+          <div className="space-y-4">
+            <label className="block text-sm font-medium text-slate-700">
+              الطلب
+              <select className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 outline-none" value={selectedRequestId} onChange={(e) => setSelectedRequestId(e.target.value)}>
+                <option value="">اختر طلباً</option>
+                {requests.map((request) => (
+                  <option key={request.id} value={request.id}>#{request.id} - {request.company_name}</option>
+                ))}
+              </select>
+            </label>
+
+            {requestDetail?.documents?.length ? (
+              <div className="space-y-3">
+                {requestDetail.documents.map((doc) => (
+                  <div key={doc.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <div className="text-sm font-bold text-slate-800">{doc.document_name}</div>
+                        <div className="text-[11px] text-slate-500">{doc.status === 'valid' ? 'مقبول' : doc.status === 'expired' ? 'منتهي' : 'مطلوب'}</div>
+                      </div>
+                      <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700">
+                        <Upload size={12} /> رفع
+                        <input type="file" multiple className="hidden" onChange={(e) => uploadRequestDocumentFiles(doc.id, e.target.files)} />
+                      </label>
+                    </div>
+                    {doc.file_name && (
+                      <a href={doc.file_path ? (doc.file_path.startsWith('http') ? doc.file_path : `${window.location.origin}${doc.file_path}`) : '#'} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-[11px] text-emerald-700 hover:underline">
+                        <Download size={11} /> {doc.file_name}
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : selectedRequestId ? (
+              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">لا توجد مستندات طلب مُعرّفة لهذا الطلب حتى الآن.</div>
+            ) : null}
+
+            {selectedRequestId && (
+              <div className="space-y-3 border-t border-slate-200 pt-4">
+                <button type="button" onClick={createRequestPackage} className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-emerald-700">
+                  <Archive size={16} /> تجميع الملف المضغوط
+                </button>
+
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-slate-700">
+                    الجهة التمويلية
+                    <select className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 outline-none" value={selectedFundingEntityId} onChange={(e) => setSelectedFundingEntityId(e.target.value)}>
+                      <option value="">اختر الجهة</option>
+                      {fundingEntities.map((entity) => (
+                        <option key={entity.id} value={entity.id}>{entity.name}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <button type="button" onClick={sendPackageToFunding} className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-blue-700">
+                    <Building2 size={16} /> إرسال الملف المضغوط للجهة
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
         <form onSubmit={handleCreate} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="mb-4 flex items-center gap-2 text-lg font-black text-slate-800"><Plus size={18} className="text-blue-600" />إنشاء مستند جديد</h2>
 

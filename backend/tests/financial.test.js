@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { buildFinancialBreakdown, summarizeMonthlyAccounting } = require('../financial');
+const { buildFinancialBreakdown, summarizeMonthlyAccounting, applyStatusFinancialUpdate } = require('../financial');
 
 const result = buildFinancialBreakdown({ funding_amount: 10000, operating_expenses: 3000, net_revenue: 7000 });
 assert.equal(result.funding_amount, 10000);
@@ -10,6 +10,17 @@ assert.equal(result.commission_amount, 7000);
 const fallback = buildFinancialBreakdown({ funding_amount: 0, operating_expenses: 1500, net_revenue: 0 });
 assert.equal(fallback.funding_amount, 1500);
 assert.equal(fallback.net_revenue, 0);
+
+const transferred = applyStatusFinancialUpdate('transferred', {
+  funding_amount: 15000,
+  operating_expenses: 4500,
+  net_revenue: 0,
+  commission_amount: 0,
+});
+assert.equal(transferred.funding_amount, 15000);
+assert.equal(transferred.operating_expenses, 4500);
+assert.equal(transferred.net_revenue, 10500);
+assert.equal(transferred.commission_amount, 10500);
 
 const summary = summarizeMonthlyAccounting([
   { type: 'revenue', amount: 6000 },

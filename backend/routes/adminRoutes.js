@@ -7,6 +7,7 @@ const { adminMiddleware, hasPermission, hasAnyPermission } = require('../middlew
 const { createNotification, notifyAdmins } = require('../services/notificationService');
 const { ensureRequestDocuments } = require('../services/requestDocuments');
 const { renderDocumentTemplate } = require('../documentTemplates');
+const { buildFinancialBreakdown, applyStatusFinancialUpdate } = require('../financial');
 
 const router = express.Router();
 
@@ -369,11 +370,23 @@ router.put('/requests/:id/status', hasPermission('update_request_status'), async
       'contract_submitted','forms_ready','forms_sent','file_submitted','missing','missing_submitted',
       'contract_received','submitted','approved','transferred','fees_received','rejected'];
     if (!validStatuses.includes(status)) return res.status(400).json({ error: 'حالة غير صحيحة' });
-    const request = await db.prepare('SELECT id, user_id, company_name FROM requests WHERE id = ?').get(req.params.id);
+    const request = await db.prepare('SELECT id, user_id, company_name, funding_amount, operating_expenses, net_revenue, commission_amount FROM requests WHERE id = ?').get(req.params.id);
     if (!request) return res.status(404).json({ error: 'الطلب غير موجود' });
+
+    const financialBreakdown = applyStatusFinancialUpdate(status, request);
+
     if (status === 'rejected' && rejection_reason) {
       await db.prepare("UPDATE requests SET status = ?, rejection_reason = ?, updated_at = NOW() WHERE id = ?")
         .run(status, rejection_reason, req.params.id);
+    } else if (['approved', 'transferred', 'fees_received'].includes(status)) {
+      await db.prepare(`UPDATE requests SET
+        status = ?,
+        funding_amount = ?,
+        operating_expenses = ?,
+        net_revenue = ?,
+        commission_amount = ?,
+        updated_at = NOW()
+        WHERE id = ?`).run(status, financialBreakdown.funding_amount, financialBreakdown.operating_expenses, financialBreakdown.net_revenue, financialBreakdown.commission_amount, req.params.id);
     } else {
       await db.prepare("UPDATE requests SET status = ?, updated_at = NOW() WHERE id = ?").run(status, req.params.id);
     }
@@ -1661,14 +1674,12 @@ router.put('/requests/:id/commission', adminMiddleware, async (req, res) => {
 
 router.put('/requests/:id/financials', adminMiddleware, async (req, res) => {
   try {
-    const fundingAmount = Number(req.body.funding_amount ?? 0);
-    const operatingExpenses = Number(req.body.operating_expenses ?? 0);
-    const safeFundingAmount = Number.isFinite(fundingAmount) ? Math.max(0, fundingAmount) : 0;
-    const safeOperatingExpenses = Number.isFinite(operatingExpenses) ? Math.max(0, operatingExpenses) : 0;
-    const safeNetRevenue = Math.max(0, safeFundingAmount - safeOperatingExpenses);
-    const commissionAmount = Number.isFinite(Number(req.body.commission_amount)) && Number(req.body.commission_amount) > 0
-      ? Math.max(0, Number(req.body.commission_amount))
-      : safeNetRevenue;
+    const breakdown = buildFinancialBreakdown({
+      funding_amount: req.body.funding_amount ?? 0,
+      operating_expenses: req.body.operating_expenses ?? 0,
+      net_revenue: req.body.net_revenue ?? 0,
+      commission_amount: req.body.commission_amount ?? 0,
+    });
 
     await db.prepare(`UPDATE requests SET
       funding_amount = ?,
@@ -1676,14 +1687,14 @@ router.put('/requests/:id/financials', adminMiddleware, async (req, res) => {
       net_revenue = ?,
       commission_amount = ?,
       updated_at = NOW()
-      WHERE id = ?`).run(safeFundingAmount, safeOperatingExpenses, safeNetRevenue, commissionAmount, req.params.id);
+      WHERE id = ?`).run(breakdown.funding_amount, breakdown.operating_expenses, breakdown.net_revenue, breakdown.commission_amount, req.params.id);
 
     res.json({
       message: 'تم حفظ البيانات المالية',
-      funding_amount: safeFundingAmount,
-      operating_expenses: safeOperatingExpenses,
-      net_revenue: safeNetRevenue,
-      commission_amount: commissionAmount,
+      funding_amount: breakdown.funding_amount,
+      operating_expenses: breakdown.operating_expenses,
+      net_revenue: breakdown.net_revenue,
+      commission_amount: breakdown.commission_amount,
     });
   } catch (err) {
     console.error(err);

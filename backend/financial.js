@@ -34,6 +34,37 @@ function buildFinancialBreakdown(input = {}) {
   };
 }
 
+function applyStatusFinancialUpdate(status, request = {}) {
+  const normalizedStatus = String(status || '').toLowerCase();
+  const baseData = buildFinancialBreakdown(request);
+
+  if (!['approved', 'transferred', 'fees_received'].includes(normalizedStatus)) {
+    return {
+      ...baseData,
+      commission_amount: toNumber(request.commission_amount, baseData.commission_amount),
+    };
+  }
+
+  const derivedRevenue = buildFinancialBreakdown({
+    funding_amount: request.funding_amount ?? baseData.funding_amount,
+    operating_expenses: request.operating_expenses ?? baseData.operating_expenses,
+    net_revenue: request.net_revenue ?? baseData.net_revenue,
+    commission_amount: request.commission_amount ?? baseData.commission_amount,
+  });
+
+  if (toNumber(request.commission_amount, 0) > 0) {
+    return {
+      ...derivedRevenue,
+      commission_amount: toNumber(request.commission_amount, derivedRevenue.net_revenue),
+    };
+  }
+
+  return {
+    ...derivedRevenue,
+    commission_amount: derivedRevenue.net_revenue,
+  };
+}
+
 function summarizeMonthlyAccounting(entries = []) {
   const safeEntries = Array.isArray(entries) ? entries : [];
   const totals = safeEntries.reduce((acc, entry) => {
@@ -58,4 +89,4 @@ function summarizeMonthlyAccounting(entries = []) {
   };
 }
 
-module.exports = { buildFinancialBreakdown, summarizeMonthlyAccounting };
+module.exports = { buildFinancialBreakdown, applyStatusFinancialUpdate, summarizeMonthlyAccounting };
