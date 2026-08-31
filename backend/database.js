@@ -249,6 +249,37 @@ async function initDatabase() {
     created_at TIMESTAMP DEFAULT NOW()
   )`);
 
+  await pool.query(`CREATE TABLE IF NOT EXISTS documents (
+    id SERIAL PRIMARY KEY,
+    request_id INTEGER,
+    document_type TEXT NOT NULL DEFAULT 'invoice',
+    document_number TEXT,
+    client_name TEXT,
+    company_name TEXT,
+    email TEXT,
+    issue_month TEXT NOT NULL,
+    total_amount REAL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'draft',
+    file_path TEXT,
+    file_name TEXT,
+    notes TEXT,
+    sent_via_email INTEGER DEFAULT 0,
+    created_by INTEGER,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+  )`);
+
+  await pool.query(`ALTER TABLE documents ADD COLUMN IF NOT EXISTS request_id INTEGER`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS document_email_logs (
+    id SERIAL PRIMARY KEY,
+    document_id INTEGER NOT NULL,
+    email TEXT NOT NULL,
+    subject TEXT,
+    sent_at TIMESTAMP DEFAULT NOW(),
+    result TEXT DEFAULT 'sent'
+  )`);
+
   await pool.query(`CREATE TABLE IF NOT EXISTS account_statements (
     id SERIAL PRIMARY KEY,
     request_id INTEGER NOT NULL,

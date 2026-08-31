@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>منشئ مستندات جنان بيز المطور</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- React and ReactDOM CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+  
+  <!-- Babel CDN to compile JSX on the fly -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous"></script>
+
+  <!-- Premium Fonts from Google -->
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=Cinzel:wght@600;800&family=Montserrat:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+
+  <style>
+    body { font-family: 'Cairo', sans-serif; }
+    .cinzel { font-family: 'Cinzel', serif; }
+    .montserrat { font-family: 'Montserrat', sans-serif; }
+    
+    @media print {
+      body { background-color: white !important; color: black !important; }
+      .no-print { display: none !important; }
+      .print-container {
+        width: 210mm !important;
+        height: auto !important; 
+        min-height: 297mm !important;
+        box-shadow: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: white !important;
+        color: black !important;
+        position: relative;
+        overflow: visible !important; 
+        box-sizing: border-box;
+      }
+      @page { size: A4 portrait; margin: 0 !important; }
+      
+      tr, table, .avoid-break {
+        page-break-inside: avoid !important;
+      }
+      
+      .page-break-before {
+        page-break-before: always !important;
+        break-before: page !important;
+      }
+
+      .watermark-print {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+    }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+    .dotted-leader {
+        flex-grow: 1;
+        border-bottom: 2px dotted #cbd5e1;
+        margin: 0 10px;
+        position: relative;
+        top: -6px;
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col">
+
+  <div id="root" class="flex-1 flex flex-col"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    function App() {
+      const today = new Date().toLocaleDateString('en-GB');
+
+      const [docType, setDocType] = useState('voucher'); // 'voucher' | 'quote' | 'invoice' | 'contract'
+      const [date, setDate] = useState(today);
+      const [refNo, setRefNo] = useState('JB-QT-2026-010');
+      
+      const [clientName, setClientName] = useState('شركة برج المرح التجارية');
+      const [unifiedNo, setUnifiedNo] = useState('7002228521');
+      const [paymentMethod, setPaymentMethod] = useState('تحويل بنكي - مصرف الراجحي');
+      const [clientCR, setClientCR] = useState('1010123456'); 
+      const [clientRep, setClientRep] = useState('رامي عيظه عمر عبد الله'); 
+      const [clientPhone, setClientPhone] = useState(''); 
+      
+      const [savedClients, setSavedClients] = useState([]);
+      const [toastMsg, setToastMsg] = useState('');
+      
+      const [items, setItems] = useState([
+        { id: 1, description: 'دراسة وتحليل الملف الائتماني والتمويلي للشركة', price: 2000 },
+        { id: 2, description: 'تهيئة وتطوير ملف الأعمال والجدوى الاستشارية', price: 1000 }
+      ]);
+
+      const [paidAmount, setPaidAmount] = useState(0);
+
+      const [showSeal, setShowSeal] = useState(true);
+      const [showRequiredDocs, setShowRequiredDocs] = useState(true); 
+      
+      const [sealRotation, setSealRotation] = useState(-6); 
+      const [sealYOffset, setSealYOffset] = useState(-30);
+      const [sealXOffset, setSealXOffset] = useState(0);
+      const [headerYOffset, setHeaderYOffset] = useState(0);
+      const [footerYOffset, setFooterYOffset] = useState(0);
+      
+      const [useTax, setUseTax] = useState(false); 
+      const [taxRate, setTaxRate] = useState(15);
+
+      const companyCR = '7052623282';
+      const companyAddress = 'الرياض - حي الملز - طريق عمر بن الخطاب';
+      const companyEmail = 'info@jenanbiz.sa';
+      const companyWebsite = 'https://jenanbiz.sa';
+      const companyIBAN = 'SA4980000536608016010525';
+      const companyPhone = '0592 292 920';
+
+      const subtotal = items.reduce((acc, item) => acc + (Number(item.price) || 0), 0);
+      const taxAmount = useTax ? (subtotal * taxRate) / 100 : 0;
+      const totalAmount = subtotal + taxAmount;
+      const remainingAmount = Math.max(0, totalAmount - paidAmount);
+
+      useEffect(() => {
+        const clients = localStorage.getItem('jinanbiz_clients');
+        if (clients) {
+          try { setSavedClients(JSON.parse(clients)); } catch(e) {}
+        }
+      }, []);
+
+      const showToast = (msg) => {
+        setToastMsg(msg);
+        setTimeout(() => setToastMsg(''), 3000);
+      };
+
+      const saveClient = () => {
+        if (!clientName) return showToast('الرجاء إدخال اسم العميل أولاً');
+        const newClient = { clientName, unifiedNo, clientCR, clientRep, clientPhone, paymentMethod };
+        const filtered = savedClients.filter(c => c.clientName !== clientName);
+        const updated = [...filtered, newClient];
+        setSavedClients(updated);
+        localStorage.setItem('jinanbiz_clients', JSON.stringify(updated));
+        showToast('تم حفظ بيانات العميل بنجاح');
+      };
+
+      const loadClient = (name) => {
+        const c = savedClients.find(c => c.clientName === name);
+        if (c) {
+          setClientName(c.clientName || '');
+          setUnifiedNo(c.unifiedNo || '');
+          setClientCR(c.clientCR || '');
+          setClientRep(c.clientRep || '');
+          setClientPhone(c.clientPhone || '');
+          if(c.paymentMethod) setPaymentMethod(c.paymentMethod);
+          showToast('تم استدعاء بيانات العميل');
+        }
+      };
+
+      const convertNumberToArabicWords = (num) => {
+        if (num === 0) return 'صفر ريال سعودي';
+        const ones = ['', 'واحد', 'اثنان', 'ثلاثة', 'أربعة', 'خمسة', 'ستة', 'سبعة', 'ثمانية', 'تسعة', 'عشرة', 'أحد عشر', 'اثنا عشر', 'ثلاثة عشر', 'أربعة عشر', 'خمسة عشر', 'ستة عشر', 'سبعة عشر', 'ثمانية عشر', 'تسعة عشر'];
+        const tens = ['', '', 'عشرون', 'ثلاثون', 'أربعون', 'خمسون', 'ستون', 'سبعون', 'ثمانون', 'تسعون'];
+        const hundreds = ['', 'مائة', 'مائتان', 'ثلاثمائة', 'أربعمائة', 'خمسمائة', 'ستمائة', 'سبعمائة', 'ثمانمائة', 'تسعمائة'];
+        const thousands = ['', 'ألف', 'ألفان', 'ثلاثة آلاف', 'أربعة آلاف', 'خمسة آلاف', 'ستة آلاف', 'سبعة آلاف', 'ثمانية آلاف', 'تسعة آلاف', 'عشرة آلاف'];
+
+        let words = '';
+        if (num >= 1000000) return num + ' ريال سعودي'; 
+        let temp = num;
+
+        if (temp >= 1000) {
+          let th = Math.floor(temp / 1000);
+          temp %= 1000;
+          if (th <= 10) {
+            words += thousands[th];
+          } else {
+            words += convertNumberToArabicWords(th).replace(' ريال سعودي', '') + ' ألف';
+          }
+        }
+        if (temp >= 100) {
+          let h = Math.floor(temp / 100);
+          temp %= 100;
+          if (words !== '') words += ' و';
+          words += hundreds[h];
+        }
+        if (temp > 0) {
+          if (words !== '') words += ' و';
+          if (temp < 20) {
+            words += ones[temp];
+          } else {
+            let o = temp % 10;
+            let t = Math.floor(temp / 10);
+            if (o > 0) {
+              words += ones[o] + ' و' + tens[t];
+            } else {
+              words += tens[t];
+            }
+          }
+        }
+        return words ? `${words} ريال سعودي فقط لا غير` : '';
+      };
+
+      const amountInWords = convertNumberToArabicWords(totalAmount);
+
+      const handleAddItem = () => {
+        const newId = items.length > 0 ? Math.max(...items.map(i => i.id)) + 1 : 1;
+        setItems([...items, { id: newId, description: '', price: 0 }]);
+      };
+      const handleDeleteItem = (id) => setItems(items.filter(item => item.id !== id));
+      const handleUpdateItem = (id, field, value) => setItems(items.map(item => item.id === id ? { ...item, [field]: value } : item));
+      const handlePrint = () => window.print();
+
+      const handleDownloadWord = () => {
+        const header = `
+          <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+          <head>
+            <meta charset='utf-8'>
+            <title>Contract</title>
+            <style>
+              body { font-family: 'Arial', sans-serif; direction: rtl; text-align: right; line-height: 1.6; }
+              h1 { text-align: center; color: #1e3a8a; font-size: 20pt; }
+              h2 { color: #1e3a8a; font-size: 14pt; margin-top: 20px; }
+              p, li { font-size: 12pt; }
+              .party { font-weight: bold; margin-bottom: 15px; }
+              .signatures { display: flex; justify-content: space-between; margin-top: 50px; text-align: center;}
+            </style>
+          </head>
+          <body>
+        `;
+        const footer = "</body></html>";
+        const content = document.getElementById("contract-print-area").innerHTML;
+        const sourceHTML = header + content + footer;
+
+        const source = 'data:application/vnd.ms-word;charset=utf-8,' + encodeURIComponent(sourceHTML);
+        const fileDownload = document.createElement("a");
+        document.body.appendChild(fileDownload);
+        fileDownload.href = source;
+        fileDownload.download = `عقد_استشارات_${clientName}.doc`;
+        fileDownload.click();
+        document.body.removeChild(fileDownload);
+      };
+
+      const handleDownloadHTML = () => {
+        const htmlContent = `<!DOCTYPE html>\n` + document.documentElement.outerHTML;
+        const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'JinanBIZ_Generator.html';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      };
+
+      const requiredDocsList = [
+        { id: 1, title: 'صور السجل التجاري' },
+        { id: 2, title: 'عقد التأسيس (إن كانت شركة)' },
+        { id: 3, title: 'صوره الهوية للمالك (الشركاء إذا كانت شركة)' },
+        { id: 4, title: 'وإذا مستثمر الهوية من ابشر (موضح تاريخ الانتهاء)' },
+        { id: 5, title: 'الترخيص الاستثماري إذا شركه أجنبيه' },
+        { id: 6, title: 'شهاده بلدي' },
+        { id: 7, title: 'شهاده التأمينات' },
+        { id: 8, title: 'شهاده الزكاه والدخل' },
+        { id: 9, title: 'شهاده الضريبة المضافة' },
+        { id: 10, title: 'عقد الايجار للمنشاه' },
+        { id: 11, title: 'العنوان الوطني للمنشاه والمالك' },
+        { id: 12, title: 'موقع من جوجل' },
+        { id: 13, title: 'شهاده الايبان بالباركود' },
+        { id: 14, title: 'بروفايل للمنشأة', sub: '(نبذة عن النشاط، الرؤية، الهيكل التنظيمي، الأهداف)' },
+        { id: 15, title: 'دراسة جدوى للمشروع', sub: '(تحليل السوق، المنافسين، التكاليف، الإيرادات المتوقعة)' }
+      ];
+
+      return (
+        <div className="flex-1 flex flex-col h-screen max-h-screen">
+          {}
+          {toastMsg && (
+            <div className="fixed top-6 left-1/2 transform -translate-x-1/2 bg-emerald-600 text-white px-6 py-3 rounded-xl shadow-2xl z-[100] font-bold text-sm transition-all border border-emerald-500">
+              {toastMsg}
+            </div>
+          )}
+          
+          {/* Header Controls */}
+          <header className="no-print bg-slate-950 border-b border-slate-800 px-6 py-4 flex flex-col lg:flex-row justify-between items-center gap-4 flex-shrink-0">
+            <div className="flex items-center gap-3 w-full lg:w-auto">
+              <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/20 flex-shrink-0">ج</div>
+              <div>
+                <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+                  منشئ مستندات جنان بيز <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full">احترافي</span>
+                </h1>
+                <p className="text-xs text-slate-400">توليد سندات، عروض، فواتير، وعقود</p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-end">
+              {docType === 'contract' && (
+                <button onClick={handleDownloadWord} className="flex items-center gap-2 bg-blue-800 hover:bg-blue-700 text-white text-xs md:text-sm px-4 py-2.5 rounded-lg transition border border-blue-600 shadow-lg shadow-blue-900/20">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                  <span>تصدير Word</span>
+                </button>
+              )}
+              <button onClick={handleDownloadHTML} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs md:text-sm px-4 py-2.5 rounded-lg transition border border-slate-700">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                <span>حفظ الأداة</span>
+              </button>
+              <button onClick={handlePrint} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs md:text-sm px-4 py-2.5 rounded-lg shadow-lg shadow-indigo-500/20 transition">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                <span>طباعة / تصدير PDF</span>
+              </button>
+            </div>
+          </header>
+
+          <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+            
+            {}
+            <div className="no-print w-full lg:w-[460px] bg-slate-950 border-l border-slate-800 overflow-y-auto p-6 space-y-6 flex-shrink-0">
+              
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-slate-400 uppercase block">تحديد نوع المستند</label>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                  <button onClick={() => setDocType('voucher')} className={`py-2 px-2 rounded-xl flex flex-col items-center gap-1 transition text-xs font-semibold ${docType === 'voucher' ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-900 text-slate-400 border border-slate-800'}`}>سند قبض</button>
+                  <button onClick={() => setDocType('quote')} className={`py-2 px-2 rounded-xl flex flex-col items-center gap-1 transition text-xs font-semibold ${docType === 'quote' ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-900 text-slate-400 border border-slate-800'}`}>عرض سعر</button>
+                  <button onClick={() => setDocType('invoice')} className={`py-2 px-2 rounded-xl flex flex-col items-center gap-1 transition text-xs font-semibold ${docType === 'invoice' ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-900 text-slate-400 border border-slate-800'}`}>فاتورة</button>
+                  <button onClick={() => setDocType('contract')} className={`py-2 px-2 rounded-xl flex flex-col items-center gap-1 transition text-xs font-semibold ${docType === 'contract' ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-900 text-slate-400 border border-slate-800'}`}>عقد استشارات</button>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800 pb-2">البيانات الأساسية</h3>
+                
+                <div className="flex items-center gap-2 bg-slate-900/60 p-2 rounded-lg border border-slate-800">
+                  <select onChange={(e) => loadClient(e.target.value)} className="flex-1 bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs text-slate-300 focus:outline-none">
+                    <option value="">-- استدعاء عميل محفوظ --</option>
+                    {savedClients.map(c => <option key={c.clientName} value={c.clientName}>{c.clientName}</option>)}
+                  </select>
+                  <button onClick={saveClient} className="bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600 hover:text-white text-[10px] px-3 py-2 rounded font-bold transition">حفظ العميل</button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <input type="text" value={date} onChange={(e) => setDate(e.target.value)} placeholder="التاريخ" className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none" dir="ltr" style={{textAlign: 'right'}} />
+                  <input type="text" value={refNo} onChange={(e) => setRefNo(e.target.value)} placeholder="رقم المرجع" className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none" dir="ltr" style={{textAlign: 'right'}} />
+                </div>
+                
+                <input type="text" value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="اسم العميل / المنشأة" className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none" />
+                
+                <div className="grid grid-cols-2 gap-3">
+                  <input type="text" value={unifiedNo} onChange={(e) => setUnifiedNo(e.target.value)} placeholder="الرقم الموحد" className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none" />
+                  {docType !== 'contract' ? (
+                     <input type="text" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} placeholder="طريقة الدفع" className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none" />
+                  ) : (
+                     <input type="text" value={clientCR} onChange={(e) => setClientCR(e.target.value)} placeholder="رقم السجل التجاري" className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none border-blue-500" />
+                  )}
+                </div>
+                
+                {docType === 'contract' && (
+                    <input type="text" value={clientRep} onChange={(e) => setClientRep(e.target.value)} placeholder="اسم الممثل من بطاقة الأحوال" className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none border-blue-500" />
+                )}
+
+                <input type="text" value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} placeholder="رقم الجوال (للحفظ والتواصل)" className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none" />
+              </div>
+
+              {docType !== 'contract' && (
+                <div className="space-y-4 pt-2">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">البنود والخدمات</h3>
+                    <button onClick={handleAddItem} className="bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-[10px] px-2.5 py-1.5 rounded-lg font-bold transition">+ إضافة</button>
+                  </div>
+                  <div className="space-y-2.5">
+                    {items.map((item) => (
+                      <div key={item.id} className="flex items-center gap-2 bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+                        <div className="flex-1 space-y-1.5">
+                          <input type="text" value={item.description} onChange={(e) => handleUpdateItem(item.id, 'description', e.target.value)} placeholder="الوصف" className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-white focus:outline-none" />
+                          <div className="flex items-center gap-1.5">
+                            <input type="number" value={item.price} onChange={(e) => handleUpdateItem(item.id, 'price', e.target.value)} className="w-24 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs text-white focus:outline-none" />
+                            <span className="text-[10px] text-slate-400">ر.س</span>
+                          </div>
+                        </div>
+                        <button onClick={() => handleDeleteItem(item.id)} className="text-red-400 hover:text-red-300 p-2 bg-red-500/10 rounded-lg transition">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {docType === 'invoice' && (
+                <div className="space-y-4 pt-2">
+                  <div className="flex items-center justify-between bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+                    <span className="text-xs font-semibold text-slate-300">المبلغ المدفوع (ر.س)</span>
+                    <input type="number" value={paidAmount} onChange={(e) => setPaidAmount(Number(e.target.value))} className="w-32 bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-sm text-emerald-400 font-bold focus:outline-none text-left" />
+                  </div>
+                </div>
+              )}
+
+              <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-800 space-y-4 mt-6">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">إعدادات العرض والأمان</h3>
+                <div className="space-y-3">
+                  
+                  {/* Toggle for Required Documents Page - Now available for all doc types including contract */}
+                  <div className="flex items-center justify-between bg-blue-900/20 p-2 rounded-lg border border-blue-900/50">
+                    <span className="text-xs font-bold text-blue-300">إرفاق صفحة "المستندات المطلوبة"</span>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" checked={showRequiredDocs} onChange={(e) => setShowRequiredDocs(e.target.checked)} className="sr-only peer" />
+                      <div className="w-9 h-5 bg-slate-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:-translate-x-full after:content-[''] after:absolute after:top-0.5 after:start-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500" />
+                    </label>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-300">عرض الختم الأزرق</span>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" checked={showSeal} onChange={(e) => setShowSeal(e.target.checked)} className="sr-only peer" />
+                      <div className="w-9 h-5 bg-slate-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:-translate-x-full after:content-[''] after:absolute after:top-0.5 after:start-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600" />
+                    </label>
+                  </div>
+
+                  {docType !== 'contract' && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-slate-300">احتساب الضريبة (15%)</span>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" checked={useTax} onChange={(e) => setUseTax(e.target.checked)} className="sr-only peer" />
+                        <div className="w-9 h-5 bg-slate-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:-translate-x-full after:content-[''] after:absolute after:top-0.5 after:start-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600" />
+                      </label>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-800 space-y-4 mt-4">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">التحكم بالمواقع والمسافات (للطباعة)</h3>
+                <div className="space-y-4">
+                  <div>
+                    <div className="flex justify-between text-[10px] text-slate-400 mb-1.5"><span>الترويسة العلوية (أعلى/أسفل)</span><span className="font-mono">{headerYOffset}px</span></div>
+                    <input type="range" min="-100" max="100" value={headerYOffset} onChange={(e)=>setHeaderYOffset(Number(e.target.value))} className="w-full accent-blue-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer" />
+                  </div>
+                  <div>
+                    <div className="flex justify-between text-[10px] text-slate-400 mb-1.5"><span>الترويسة السفلية (أعلى/أسفل)</span><span className="font-mono">{footerYOffset}px</span></div>
+                    <input type="range" min="-100" max="100" value={footerYOffset} onChange={(e)=>setFooterYOffset(Number(e.target.value))} className="w-full accent-blue-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer" />
+                  </div>
+                  <div className="pt-2 border-t border-slate-800">
+                    <div className="flex justify-between text-[10px] text-slate-400 mb-1.5"><span>الختم (أعلى/أسفل)</span><span className="font-mono">{sealYOffset}px</span></div>
+                    <input type="range" min="-150" max="150" value={sealYOffset} onChange={(e)=>setSealYOffset(Number(e.target.value))} className="w-full accent-blue-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer" />
+                  </div>
+                  <div>
+                    <div className="flex justify-between text-[10px] text-slate-400 mb-1.5"><span>الختم (يمين/يسار)</span><span className="font-mono">{sealXOffset}px</span></div>
+                    <input type="range" min="-300" max="300" value={sealXOffset} onChange={(e)=>setSealXOffset(Number(e.target.value))} className="w-full accent-blue-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer" />
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            {}
+            <div className="flex-1 bg-slate-800 overflow-y-auto p-4 md:p-8 flex justify-center items-start">
+              
+              <div className="print-container bg-white text-black w-[210mm] shadow-2xl relative transition-all duration-300 flex flex-col justify-start">
+                
+                {/* --- MAIN DOCUMENT --- */}
+                <div className="relative p-12 md:p-14 min-h-[297mm] flex flex-col z-10">
+                  
+                  {/* Top waves background */}
+                  <div className="absolute top-0 left-0 right-0 h-44 pointer-events-none z-0">
+                    <svg viewBox="0 0 800 160" preserveAspectRatio="none" className="w-full h-full">
+                      <defs><linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#d1e6fc" /><stop offset="100%" stopColor="#ffffff" stopOpacity="0" /></linearGradient></defs>
+                      <path d="M 0,0 L 800,0 L 800,80 C 600,120 400,30 0,90 Z" fill="url(#skyGrad)" />
+                      <path d="M 0,105 C 300,150 500,45 800,100 L 800,103 C 500,48 300,153 0,108 Z" fill="#90caf9" opacity="0.6" />
+                      <path d="M 0,115 C 280,165 480,55 800,105 L 800,108 C 480,58 280,168 0,118 Z" fill="#64b5f6" opacity="0.4" />
+                    </svg>
+                  </div>
+
+                  {/* Watermark Logo (Centered, Faint, Grayscale, Non-repeating) */}
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0 watermark-print" style={{ opacity: 0.04 }}>
+                     <div className="flex items-center gap-2 select-none grayscale" style={{ transform: 'scale(5)' }} dir="ltr">
+                       <svg width="45" height="85" viewBox="0 0 70 110" xmlns="http://www.w3.org/2000/svg" className="text-black fill-current flex-shrink-0">
+                         <path d="M 45,15 H 68 V 22 H 58 V 72 C 58,86 51,96 36,96 C 22,96 15,88 15,77 H 25 C 25,82 29,87 35,87 C 42,87 46,82 46,72 V 22 H 36 V 15 H 45 Z" />
+                       </svg>
+                       <div className="flex flex-col justify-center -ml-1 text-left">
+                         <span className="text-[34px] font-bold tracking-tight text-black leading-none cinzel">enan</span>
+                         <span className="text-[30px] font-black tracking-wider text-black leading-none mt-1 montserrat uppercase">BIZ</span>
+                       </div>
+                     </div>
+                  </div>
+
+                  {/* Regular Header content - Unified for ALL documents */
+                   (
+                    <div className="flex justify-between items-start pb-4 border-b border-slate-100/60 z-10 relative" style={{ transform: `translateY(${headerYOffset}px)` }}>
+                      <div className="text-right space-y-1 text-[11px] max-w-[320px]">
+                        <div className="font-black text-slate-900 text-[15px] leading-tight font-sans">جنان بيز</div>
+                        <div className="text-slate-700 font-bold">رقم السجل الموحد: <span className="font-mono">{companyCR}</span></div>
+                        <div className="text-slate-600 font-bold text-[10px]">{companyAddress}</div>
+                        <div className="pt-1 mt-1 border-t border-dashed border-slate-200/80 flex flex-col gap-0.5 text-[10px] text-slate-500">
+                          <div className="flex items-center gap-1.5 justify-start">
+                             <span className="font-bold">التاريخ / Date :</span>
+                             <span className="font-bold text-slate-800" dir="ltr">{date}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 justify-start">
+                             <span className="font-bold">رقم المرجع / Ref No :</span>
+                             <span className="font-bold font-mono text-slate-800" dir="ltr">{refNo}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="flex items-center gap-1 justify-end select-none" dir="ltr">
+                          <svg width="45" height="85" viewBox="0 0 70 110" xmlns="http://www.w3.org/2000/svg" className="text-black fill-current flex-shrink-0">
+                            <path d="M 45,15 H 68 V 22 H 58 V 72 C 58,86 51,96 36,96 C 22,96 15,88 15,77 H 25 C 25,82 29,87 35,87 C 42,87 46,82 46,72 V 22 H 36 V 15 H 45 Z" />
+                          </svg>
+                          <div className="flex flex-col justify-center -ml-1 text-left">
+                            <span className="text-[34px] font-bold tracking-tight text-black leading-none cinzel">enan</span>
+                            <span className="text-[30px] font-black tracking-wider text-blue-600 leading-none mt-1 montserrat uppercase">BIZ</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                   )}
+
+                  {/* Document Content Logic */
+                   docType !== 'contract' ? (
+                    <div className="relative z-10 flex-1 flex flex-col justify-start mt-2">
+                      
+                      {docType === 'voucher' && (
+                        <div className="space-y-4 px-3 max-w-[680px] mx-auto w-full">
+                          <div className="text-center space-y-0.5">
+                            <h1 className="text-xl font-black text-slate-900 tracking-widest">سند قبض</h1>
+                            <span className="text-[10px] text-slate-500 font-bold block tracking-widest">RECEIPT VOUCHER</span>
+                          </div>
+                          <div className="space-y-3 py-1.5 text-xs text-slate-800">
+                            <div className="flex justify-between items-center gap-4 border-b border-dashed border-slate-200 pb-1.5">
+                              <span className="text-slate-500 font-bold whitespace-nowrap">Amount in Digits:</span>
+                              <div className="flex-1 font-mono font-bold text-slate-900 text-sm text-center">{totalAmount.toLocaleString()} SAR</div>
+                              <span className="text-slate-500 font-bold whitespace-nowrap" dir="rtl">:المبلغ بالأرقام</span>
+                            </div>
+                            <div className="flex justify-between items-center gap-4 border-b border-dashed border-slate-200 pb-1.5">
+                              <span className="text-slate-500 font-bold whitespace-nowrap">Received from:</span>
+                              <div className="flex-1 font-black text-slate-900 text-sm text-center">{clientName}</div>
+                              <span className="text-slate-500 font-bold whitespace-nowrap" dir="rtl">:استلمنا من السيد/السادة</span>
+                            </div>
+                            <div className="flex justify-between items-center gap-4 border-b border-dashed border-slate-200 pb-1.5">
+                              <span className="text-slate-500 font-bold whitespace-nowrap">Sum of:</span>
+                              <div className="flex-1 font-bold text-slate-800 text-[11px] text-center px-2">{amountInWords}</div>
+                              <span className="text-slate-500 font-bold whitespace-nowrap" dir="rtl">:مبلغاً وقدره فقط</span>
+                            </div>
+                            <div className="flex justify-between items-start gap-4 border-b border-dashed border-slate-200 pb-1.5">
+                              <span className="text-slate-500 font-bold whitespace-nowrap mt-0.5">Being for:</span>
+                              <div className="flex-1 text-slate-900 text-center space-y-1 font-bold">
+                                {items.map((item) => <div key={item.id} className="text-xs">- {item.description}</div>)}
+                              </div>
+                              <span className="text-slate-500 font-bold whitespace-nowrap mt-0.5" dir="rtl">:وذلك عن قيمة</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {docType === 'quote' && (
+                        <div className="space-y-4 px-3 w-full">
+                            <div className="text-center space-y-0.5">
+                              <h1 className="text-xl font-black text-slate-900 tracking-widest">عرض سعر</h1>
+                              <span className="text-[10px] text-slate-500 font-bold block tracking-widest">PRICE QUOTATION</span>
+                            </div>
+                            <div className="bg-slate-50 border-y border-slate-200 py-2.5 px-3 grid grid-cols-2 gap-4 text-xs">
+                              <div className="space-y-1 text-right">
+                                <span className="text-[10px] text-slate-400 block">موجه إلى السادة:</span>
+                                <strong className="text-sm text-slate-900 block">{clientName}</strong>
+                              </div>
+                              <div className="space-y-1 text-left">
+                                <span className="text-[10px] text-slate-400 block">الرقم الموحد للعميل:</span>
+                                <strong className="text-sm text-slate-900 font-mono block">{unifiedNo || 'N/A'}</strong>
+                              </div>
+                            </div>
+                            <table className="w-full text-right text-xs">
+                              <thead>
+                                <tr className="border-b border-slate-900 text-slate-700 font-bold">
+                                  <th className="py-2 w-10 text-center">م</th><th className="py-2">تفاصيل الخدمة</th><th className="py-2 text-center w-32">السعر</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 text-slate-800">
+                                {items.map((item, index) => (
+                                  <tr key={item.id}><td className="py-2 text-center text-slate-400">{index + 1}</td><td className="py-2 font-semibold">{item.description}</td><td className="py-2 text-center font-bold font-mono">{Number(item.price).toLocaleString()} ر.س</td></tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            <div className="flex justify-end text-xs">
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-2 text-right w-1/2">
+                                  <div className="flex justify-between items-center text-slate-500 text-[10px]"><span>المجموع:</span><span className="font-mono">{subtotal.toLocaleString()} ر.س</span></div>
+                                  {useTax && <div className="flex justify-between items-center text-slate-500 text-[10px]"><span>الضريبة (15%):</span><span className="font-mono">{taxAmount.toLocaleString()} ر.س</span></div>}
+                                  <div className="pt-2 border-t border-slate-200 flex justify-between items-center font-black text-slate-900 text-sm"><span>الإجمالي:</span><span className="font-mono text-blue-600">{totalAmount.toLocaleString()} ر.س</span></div>
+                              </div>
+                            </div>
+                        </div>
+                      )}
+
+                      {docType === 'invoice' && (
+                        <div className="space-y-4 px-3 w-full">
+                            <div className="text-center space-y-0.5">
+                              <h1 className="text-xl font-black text-slate-900 tracking-widest">فاتورة مبيعات</h1>
+                              <span className="text-[10px] text-slate-500 font-bold block tracking-widest">SALES INVOICE</span>
+                            </div>
+                            <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-100 text-xs text-right">
+                              <span className="text-[10px] text-slate-400 font-bold block">مُصدرة إلى:</span>
+                              <strong className="text-slate-900 text-sm block">{clientName}</strong>
+                              <span className="text-slate-600 block">الرقم الموحد: {unifiedNo}</span>
+                            </div>
+                            <table className="w-full text-right text-xs">
+                              <thead>
+                                <tr className="border-b border-slate-900 text-slate-700 font-bold">
+                                  <th className="py-2 w-8 text-center">#</th><th className="py-2">الخدمة</th><th className="py-2 text-center w-28">المبلغ</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 text-slate-800">
+                                {items.map((item, index) => {
+                                  const itemTotal = (Number(item.price) || 0) * (useTax ? 1.15 : 1);
+                                  return (
+                                    <tr key={item.id}><td className="py-2 text-center text-slate-400">{index + 1}</td><td className="py-2 font-semibold">{item.description}</td><td className="py-2 text-center font-bold font-mono">{itemTotal.toLocaleString()} ر.س</td></tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                            <div className="flex justify-end text-xs">
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-2 text-right w-1/2">
+                                  <div className="flex justify-between items-center text-slate-500 text-[10px]"><span>المجموع:</span><span className="font-mono">{subtotal.toLocaleString()} ر.س</span></div>
+                                  {useTax && <div className="flex justify-between items-center text-slate-500 text-[10px]"><span>الضريبة:</span><span className="font-mono">{taxAmount.toLocaleString()} ر.س</span></div>}
+                                  <div className="pt-2 border-t border-slate-200 flex justify-between items-center font-black text-slate-900 text-sm"><span>الإجمالي:</span><span className="font-mono text-blue-600">{totalAmount.toLocaleString()} ر.س</span></div>
+                                  <div className="flex justify-between items-center text-emerald-600 text-[11px] font-bold pt-1"><span>المدفوع:</span><span className="font-mono">{paidAmount.toLocaleString()} ر.س</span></div>
+                                  <div className="flex justify-between items-center text-red-600 text-sm font-black pt-1 border-t border-red-100"><span>المتبقي:</span><span className="font-mono">{remainingAmount.toLocaleString()} ر.س</span></div>
+                              </div>
+                            </div>
+                        </div>
+                      )}
+                    </div>
+                   ) : (
+                    // --- CONTRACT CONTENT ---
+                    <div id="contract-print-area" className="relative z-10 flex-1 flex flex-col justify-start mt-2">
+                       <div className="text-center mb-8 relative">
+                          <h1 className="inline-block relative font-black text-2xl md:text-3xl text-blue-900 font-cairo pb-3">
+                             عقد الخدمات الاستشارية
+                             <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-4/5 h-1.5 bg-gradient-to-r from-transparent via-blue-700 to-transparent rounded-full opacity-80"></div>
+                          </h1>
+                       </div>
+                       
+                       <div className="space-y-6 text-sm text-slate-800 leading-relaxed font-semibold text-justify">
+                          
+                          <div className="space-y-2">
+                             <div className="bg-slate-50 p-3 rounded border border-slate-100">
+                                <span className="font-bold text-blue-900">الطرف الأول:</span> جنان بيز (JENANBIZ)، سجل تجاري رقم ({companyCR})، ومقرها مدينة الرياض، ويمثلها في التوقيع الأستاذة/ خالد عبدالله العجيل
+                                <br/>
+                                <span className="text-xs text-slate-500 mt-1 block">(ويُشار إليها في هذا العقد بـ "جنان بيز")</span>
+                             </div>
+                             <div className="bg-slate-50 p-3 rounded border border-slate-100">
+                                <span className="font-bold text-blue-900">الطرف الثاني:</span> {clientName} , رقم موحد ({unifiedNo})، سجل تجاري رقم ({clientCR})، ويمثلها في التوقيع الأستاذ/ {clientRep}
+                                <br/>
+                                <span className="text-xs text-slate-500 mt-1 block">(ويُشار إليه في هذا العقد بـ "العميل")</span>
+                             </div>
+                          </div>
+
+                          <div>
+                             <h2 className="font-bold text-lg text-blue-900 mb-2">تمهيد:</h2>
+                             <p>بما إن جنان بيز تمتلك الخبرة المهنية في مجال الاستشارات الإدارية والمالية وتطوير الأعمال وتهيئة الملفات الائتمانية، وبما أن العميل يرغب في الاستعانة بخدمات جنان بيز لتطوير أعماله وتسهيل حصوله على حلول تمويلية أو استشارية، فقد اتفق الطرفان وهما بكامل أهليتهما المعتبرة على البنود التالية:</p>
+                          </div>
+
+                          <div>
+                             <h2 className="font-bold text-lg text-blue-900 mb-2">المادة الأولى: نطاق العمل</h2>
+                             <p>تقوم جنان بيز بتقديم الخدمات الاستشارية للعميل، والتي تشمل:</p>
+                             <ul className="list-disc list-inside mt-2 space-y-1 pr-2">
+                               <li>دراسة وتحليل الوضع المالي والإداري للعميل وتقديم التوصيات اللازمة.</li>
+                               <li>تجهيز الملفات الائتمانية وتقديمها للجهات الممولة (بنوك، شركات تمويل، منصات تقنية مالية).</li>
+                               <li>تقديم الدعم الاستشاري في التفاوض للحصول على أفضل الشروط التمويلية (نقاط بيع، رهن عقاري، تمويل رأسمال عامل).</li>
+                             </ul>
+                          </div>
+
+                          <div>
+                             <h2 className="font-bold text-lg text-blue-900 mb-2">المادة الثانية: طبيعة العلاقة</h2>
+                             <ol className="list-decimal list-inside mt-2 space-y-1 pr-2">
+                               <li>لا يمثل الطرف الأول جهة تمويل أو جهة إصدار قرارات مالية.</li>
+                               <li>قرارات الموافقة أو الرفض تعود حصريًا للجهات ذات العلاقة وفق سياساتها الداخلية.</li>
+                               <li>لا يضمن الطرف الأول حصول العميل على أي تسهيلات مالية.</li>
+                             </ol>
+                          </div>
+
+                          <div>
+                             <h2 className="font-bold text-lg text-blue-900 mb-2">المادة الثالثة: التزامات العميل</h2>
+                             <p>يلتزم العميل بتوفير كافة البيانات والمستندات (القوائم المالية، كشوفات الحسابات، السجلات) التي تطلبها جنان بيز في وقتها المحدد، ويقر العميل بمسؤوليته القانونية الكاملة عن صحة هذه البيانات أمام جنان بيز وأمام الجهات الممولة أو الرسمية.</p>
+                          </div>
+
+                          <div className="page-break-before pt-6 md:pt-0">
+                             <h2 className="font-bold text-lg text-blue-900 mb-2">المادة الرابعة: الأتعاب</h2>
+                             <ol className="list-decimal list-inside mt-2 space-y-2 pr-2">
+                               <li>يستحق الطرف الأول أتعابًا قدرها ( 10% ) من قيمة التسهيلات المالية التي يحصل عليها العميل نتيجة مباشرة الخدمات المقدمة بموجب هذا العقد.</li>
+                               <li>تستحق الأتعاب عند نزول مبلغ التسهيلات فعليًا في حساب العميل أو تمكينه من الاستفادة منها، أيهما أسبق. ويلتزم بالسداد فورا عند الحصول على التسهيلات المالية.</li>
+                               <li>يتم السداد والتحويل بالحساب البنكي الرسمي للطرف الأول وفق البيانات التالية:
+                                  <ul className="list-none pr-6 mt-1 space-y-1 text-sm bg-slate-50 p-3 rounded border border-slate-100">
+                                    <li><span className="font-bold">اسم البنك:</span> مصرف الراجحي</li>
+                                    <li><span className="font-bold">اسم الحساب:</span> جنان بيز</li>
+                                    <li><span className="font-bold">رقم الآيبان:</span> <span className="font-mono text-left inline-block" dir="ltr">{companyIBAN}</span></li>
+                                  </ul>
+                               </li>
+                               <li>يقر العميل علمًا وقبولًا بأن نسبة الأتعاب المتفق عليها تم تحديدها برضاه الكامل وبعد اطلاعه وفهمه لطبيعة الخدمات المقدمة.</li>
+                               <li>يسري هذا العقد لمدة ( 3 ) أشهر تبدأ من تاريخ توقيعه، ويحق لأي طرف إنهاء العقد بإشعار كتابي قبل (15) يوما . بشرط الا يخل ذلك بالحقوق المالية لـ جنان بيز عن الأعمال التي تم البدء فيها.</li>
+                               <li>في حال انتهاء مدة العقد و مازالت المعاملة لدى الجهه الممولة تحت الدراسة لأي سبب كان , وحصل العميل على موافقه من هذه الجهه الممولة و استلم مبلغ التمويل , فيحق لجنان بيز اتعابها المتفق عليها مسبقا.</li>
+                               <li>يحق للعميل بعد انتهاء مدة العقد الـ ( 3 ) اشهر التقديم على أي جهة اخرى.</li>
+                             </ol>
+                          </div>
+
+                          <div>
+                             <h2 className="font-bold text-lg text-blue-900 mb-2">المادة الخامسة: استحقاق الأتعاب والالتزام بالسداد</h2>
+                             <p>وتُعد هذه الأتعاب دينًا ثابتًا في ذمة العميل متى تحققت حالة الاستحقاق، ويلتزم بسدادها ( فوراً ) في حين الحصول على مبلغ التسهيلات المالية ، وفي حال التأخر يلتزم بدفع تعويض اتفاقي قدره (2.5%) من قيمة الأتعاب المستحقة، دون الإخلال بحق الطرف الأول في المطالبة بكامل المبلغ والمصاريف القضائية وأتعاب المحاماة وفق الأنظمة المعمول بها.</p>
+                          </div>
+
+                          <div>
+                             <h2 className="font-bold text-lg text-blue-900 mb-2">المادة السادسة: القانون الواجب للتطبيق</h2>
+                             <p>يخضع هذا العقد لأنظمة المملكة العربية السعودية، وفي حال نشوء أي نزاع -لا قدر الله- يتم حله ودياً، وفي حال تعذر ذلك تختص المحاكم بمدينة الرياض بالفصل فيه.</p>
+                          </div>
+                          
+                          {/* Signatures Area */}
+                          <div className="grid grid-cols-2 gap-8 mt-8 pt-6 border-t border-slate-200 avoid-break text-center font-bold text-slate-900 text-sm">
+                             <div className="relative">
+                                <p>الطرف الأول</p>
+                                <p className="mt-8 text-slate-400 font-normal text-xs">التوقيع والختم</p>
+                                {/* ختم جنان بيز الموحد مخصص لمساحة التوقيع في العقد */}
+                                {showSeal && (
+                                  <div className="absolute pointer-events-none" style={{ top: `${-10 - sealYOffset}px`, left: `50%`, marginLeft: `${sealXOffset}px`, transform: `translateX(-50%) rotate(${sealRotation}deg) scale(0.85)` }}>
+                                    <svg width="200" height="130" viewBox="0 0 250 160" xmlns="http://www.w3.org/2000/svg" className="text-blue-800 fill-current opacity-90">
+                                      <defs>
+                                        <path id="top-arc" d="M 45,80 A 80,50 0 0,1 205,80" />
+                                        <path id="bottom-arc" d="M 205,80 A 80,50 0 0,1 45,80" />
+                                      </defs>
+                                      
+                                      <ellipse cx="125" cy="80" rx="120" ry="75" fill="none" stroke="currentColor" strokeWidth="3.5" />
+                                      <ellipse cx="125" cy="80" rx="112" ry="67" fill="none" stroke="currentColor" strokeWidth="1" />
+                                      <ellipse cx="125" cy="80" rx="65" ry="35" fill="none" stroke="currentColor" strokeWidth="1.5" />
+
+                                      <text x="125" y="72" fontFamily="'Cairo', sans-serif" fontSize="18" fontWeight="bold" textAnchor="middle">س.ت</text>
+                                      <text x="125" y="98" fontFamily="'Cairo', sans-serif" fontSize="20" fontWeight="bold" textAnchor="middle" letterSpacing="1px">٧٠٥٢٦٢٣٢٨٢</text>
+
+                                      <text fontFamily="'Cairo', sans-serif" fontSize="22" fontWeight="bold" fill="currentColor">
+                                        <textPath href="#top-arc" startOffset="50%" textAnchor="middle">مؤسسة جينانبز</textPath>
+                                      </text>
+                                      <text fontFamily="'Montserrat', sans-serif" fontSize="17" fontWeight="bold" fill="currentColor">
+                                        <textPath href="#bottom-arc" startOffset="50%" textAnchor="middle">Jinanbz Foundation</textPath>
+                                      </text>
+
+                                      <text x="25" y="88" fontSize="22" fill="currentColor">★</text>
+                                      <text x="225" y="88" fontSize="22" fill="currentColor" textAnchor="end">★</text>
+                                    </svg>
+                                  </div>
+                                )}
+                             </div>
+                             <div>
+                                <p>الطرف الثاني</p>
+                                <p className="mt-8 text-slate-400 font-normal text-xs">التوقيع والختم</p>
+                             </div>
+                          </div>
+
+                       </div>
+                    </div>
+                   )
+                  }
+
+                  <div className="flex-grow min-h-[40px]"></div>
+
+                  {/* Main Document Footer & Seal - Now unified for ALL documents */
+                   (
+                    <div className="mt-8 border-t border-slate-100 pt-4 relative avoid-break z-20" style={{ transform: `translateY(${footerYOffset}px)` }}>
+                      {showSeal && docType !== 'contract' && (
+                          <div className="absolute left-4 pointer-events-none" style={{ transform: `rotate(${sealRotation}deg) scale(0.95)`, bottom: `${sealYOffset}px`, marginLeft: `${sealXOffset}px` }}>
+                            <svg width="200" height="130" viewBox="0 0 250 160" xmlns="http://www.w3.org/2000/svg" className="text-blue-800 fill-current opacity-90">
+                              <defs>
+                                <path id="top-arc" d="M 45,80 A 80,50 0 0,1 205,80" />
+                                <path id="bottom-arc" d="M 205,80 A 80,50 0 0,1 45,80" />
+                              </defs>
+                              
+                              <ellipse cx="125" cy="80" rx="120" ry="75" fill="none" stroke="currentColor" strokeWidth="3.5" />
+                              <ellipse cx="125" cy="80" rx="112" ry="67" fill="none" stroke="currentColor" strokeWidth="1" />
+                              <ellipse cx="125" cy="80" rx="65" ry="35" fill="none" stroke="currentColor" strokeWidth="1.5" />
+
+                              <text x="125" y="72" fontFamily="'Cairo', sans-serif" fontSize="18" fontWeight="bold" textAnchor="middle">س.ت</text>
+                              <text x="125" y="98" fontFamily="'Cairo', sans-serif" fontSize="20" fontWeight="bold" textAnchor="middle" letterSpacing="1px">٧٠٥٢٦٢٣٢٨٢</text>
+
+                              <text fontFamily="'Cairo', sans-serif" fontSize="22" fontWeight="bold" fill="currentColor">
+                                <textPath href="#top-arc" startOffset="50%" textAnchor="middle">مؤسسة جينانبز</textPath>
+                              </text>
+                              <text fontFamily="'Montserrat', sans-serif" fontSize="17" fontWeight="bold" fill="currentColor">
+                                <textPath href="#bottom-arc" startOffset="50%" textAnchor="middle">Jinanbz Foundation</textPath>
+                              </text>
+
+                              <text x="25" y="88" fontSize="22" fill="currentColor">★</text>
+                              <text x="225" y="88" fontSize="22" fill="currentColor" textAnchor="end">★</text>
+                            </svg>
+                          </div>
+                        )}
+                        <div className="flex justify-between items-center text-[9px] font-bold text-slate-500 relative px-2">
+                          <div><span>{companyWebsite}</span></div><div><span>{companyAddress}</span></div><div><span>{companyEmail}</span></div>
+                        </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Required Documents Page (Now available for all docs if checked) */}
+                {showRequiredDocs && (
+                  <div className="page-break-before relative p-12 md:p-14 min-h-[297mm] flex flex-col bg-white">
+                    
+                    <div className="absolute top-0 left-0 right-0 h-32 pointer-events-none z-0">
+                      <svg viewBox="0 0 800 120" preserveAspectRatio="none" className="w-full h-full">
+                        <path d="M 0,0 L 800,0 L 800,60 C 600,100 400,20 0,80 Z" fill="#e3f2fd" />
+                        <path d="M 0,0 L 800,0 L 800,40 C 500,80 300,10 0,60 Z" fill="#90caf9" opacity="0.7" />
+                      </svg>
+                    </div>
+
+                    <div className="relative z-10 flex flex-col h-full">
+                      <div className="flex justify-between items-center mb-8">
+                         <div className="text-right">
+                           <h2 className="text-2xl font-black text-blue-800 flex items-center justify-end gap-3 font-cairo">
+                             الأوراق المطلوبة
+                             <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-blue-600"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                           </h2>
+                         </div>
+                         <div className="flex items-center gap-1 justify-end select-none" dir="ltr">
+                            <svg width="45" height="85" viewBox="0 0 70 110" xmlns="http://www.w3.org/2000/svg" className="text-black fill-current flex-shrink-0">
+                              <path d="M 45,15 H 68 V 22 H 58 V 72 C 58,86 51,96 36,96 C 22,96 15,88 15,77 H 25 C 25,82 29,87 35,87 C 42,87 46,82 46,72 V 22 H 36 V 15 H 45 Z" />
+                            </svg>
+                            <div className="flex flex-col justify-center -ml-1 text-left">
+                              <span className="text-[28px] font-bold tracking-tight text-black leading-none cinzel">enan</span>
+                              <span className="text-[24px] font-black tracking-wider text-blue-600 leading-none mt-1 montserrat uppercase">BIZ</span>
+                            </div>
+                          </div>
+                      </div>
+
+                      <div className="flex-1 space-y-4">
+                        {requiredDocsList.map((doc, index) => (
+                          <div key={doc.id} className="flex items-center w-full group">
+                            <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-800 flex items-center justify-center text-[10px] font-bold flex-shrink-0">
+                                {index + 1}
+                            </div>
+                            
+                            <div className="ml-2 mr-3 flex flex-col justify-center">
+                               <span className="text-[13px] font-bold text-slate-800 leading-tight">{doc.title}</span>
+                               {doc.sub && <span className="text-[10px] font-semibold text-slate-500 mt-0.5">{doc.sub}</span>}
+                            </div>
+
+                            <div className="dotted-leader"></div>
+
+                            <div className="flex-shrink-0 mr-2">
+                               <div className="no-print">
+                                  <input type="file" id={`upload-${doc.id}`} className="hidden" />
+                                  <label htmlFor={`upload-${doc.id}`} className="flex items-center justify-center w-8 h-8 rounded bg-slate-50 border border-slate-200 hover:bg-blue-50 hover:border-blue-300 text-blue-600 cursor-pointer transition shadow-sm" title="إرفاق ملف">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                                  </label>
+                               </div>
+                               <div className="hidden print:flex items-center justify-center w-6 h-6 border-2 border-slate-300 rounded bg-white"></div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="mt-8 border border-blue-200 rounded-xl p-4 bg-blue-50/50 relative">
+                         <div className="absolute top-4 right-4 text-blue-600">
+                           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                         </div>
+                         <h4 className="text-sm font-bold text-blue-900 mb-2 mr-8">الإقرارات الضريبية:</h4>
+                         <ul className="list-disc list-inside text-xs font-semibold text-slate-700 space-y-1.5 mr-8">
+                            <li>أخر 6 إقرارات إذا كانت ربع سنوية.</li>
+                            <li>أخر 15 إقرار إذا كانت شهرية.</li>
+                         </ul>
+                         <p className="text-[11px] font-bold text-slate-600 mt-3 mr-8">
+                            * التصريح إن كان نشاط نقليات أو مركز طبي أو شقق مفروشة كلاً حسب الجهة التابع لها.
+                         </p>
+                      </div>
+
+                      <div className="mt-6 pt-4 border-t border-slate-200 flex justify-between items-center text-[10px] font-bold text-slate-500">
+                        <div className="flex items-center gap-1">
+                           <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                           <span>{companyWebsite}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                           <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+                           <span dir="ltr">{companyPhone}</span>
+                        </div>
+                      </div>
+
+                    </div>
+                  </div>
+                )}
+
+              </div>
+            </div>
+
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+
+</body>
+</html>

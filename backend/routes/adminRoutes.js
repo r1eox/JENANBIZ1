@@ -6,6 +6,7 @@ const db = require('../database');
 const { adminMiddleware, hasPermission, hasAnyPermission } = require('../middleware/authMiddleware');
 const { createNotification, notifyAdmins } = require('../services/notificationService');
 const { ensureRequestDocuments } = require('../services/requestDocuments');
+const { renderDocumentTemplate } = require('../documentTemplates');
 
 const router = express.Router();
 
@@ -57,6 +58,15 @@ function sanitizeArchiveName(value = '') {
     .replace(/[\\/:*?"<>|]+/g, '-')
     .replace(/\s+/g, ' ')
     .trim() || 'file';
+}
+
+function toDocumentUrl(filePath = '') {
+  if (!filePath) return '';
+  const normalized = String(filePath).replace(/\\/g, '/');
+  const relative = normalized.includes('/uploads/')
+    ? normalized.split('/uploads/').pop()
+    : path.relative(path.join(__dirname, '../uploads'), normalized).replace(/\\/g, '/');
+  return relative ? `/uploads/${relative.replace(/^\/+/, '')}` : '';
 }
 
 async function createZipArchive(zipPath, entries) {
@@ -1206,6 +1216,188 @@ router.post('/accounting/entries/:id/documents', adminMiddleware, accountingDocu
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'خطأ في رفع الملف' });
+  }
+});
+
+// ===== DOCUMENTS =====
+router.get('/documents', adminMiddleware, async (req, res) => {
+  try {
+    const month = req.query.month || new Date().toISOString().slice(0, 7);
+    const documents = await db.prepare(`SELECT * FROM documents WHERE issue_month = ? ORDER BY created_at DESC`).all(month);
+    res.json({
+      month,
+      documents: documents.map((doc) => ({
+        ...doc,
+        total_amount: Number(doc.total_amount || 0),
+        sent_via_email: Boolean(doc.sent_via_email),
+        url: toDocumentUrl(doc.file_path),
+      }))
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'خطأ في استرجاع المستندات' });
+  }
+});
+
+router.get('/documents/summary', adminMiddleware, async (req, res) => {
+  try {
+    const month = req.query.month || new Date().toISOString().slice(0, 7);
+    const row = await db.prepare(`
+      SELECT
+        COUNT(*) AS total_documents,
+        COALESCE(SUM(CASE WHEN document_type = 'invoice' THEN 1 ELSE 0 END), 0) AS invoice_count,
+        COALESCE(SUM(CASE WHEN document_type = 'receipt' THEN 1 ELSE 0 END), 0) AS receipt_count,
+        COALESCE(SUM(CASE WHEN document_type = 'quote' THEN 1 ELSE 0 END), 0) AS quote_count,
+        COALESCE(SUM(CASE WHEN document_type = 'contract' THEN 1 ELSE 0 END), 0) AS contract_count,
+        COALESCE(SUM(CASE WHEN document_type = 'other' THEN 1 ELSE 0 END), 0) AS other_count,
+        COALESCE(SUM(total_amount), 0) AS total_amount,
+        COALESCE(SUM(CASE WHEN sent_via_email = 1 THEN 1 ELSE 0 END), 0) AS sent_count
+      FROM documents
+      WHERE issue_month = ?
+    `).get(month);
+
+    const summary = {
+      total_documents: Number(row?.total_documents || 0),
+      invoice_count: Number(row?.invoice_count || 0),
+      receipt_count: Number(row?.receipt_count || 0),
+      quote_count: Number(row?.quote_count || 0),
+      contract_count: Number(row?.contract_count || 0),
+      other_count: Number(row?.other_count || 0),
+      total_amount: Number(row?.total_amount || 0),
+      sent_count: Number(row?.sent_count || 0),
+    };
+
+    res.json({ month, summary });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'خطأ في حساب ملخص المستندات' });
+  }
+});
+
+router.post('/documents', adminMiddleware, async (req, res) => {
+  try {
+    const {
+      document_type = 'invoice',
+      document_number,
+      client_name,
+      company_name,
+      email,
+      total_amount = 0,
+      notes,
+      issue_month,
+      request_id,
+    } = req.body || {};
+
+    const normalizedType = ['invoice', 'receipt', 'quote', 'contract', 'other'].includes(String(document_type || '').toLowerCase())
+      ? String(document_type).toLowerCase()
+      : 'invoice';
+    const normalizedMonth = String(issue_month || new Date().toISOString().slice(0, 7));
+    const amount = Number(total_amount || 0);
+    const requestId = request_id ? Number(request_id) : null;
+
+    if (!document_number || !document_number.trim()) {
+      return res.status(400).json({ error: 'رقم المستند مطلوب' });
+    }
+
+    if (requestId) {
+      const request = await db.prepare('SELECT * FROM requests WHERE id = ?').get(requestId);
+      if (!request) return res.status(404).json({ error: 'طلب المصدر غير موجود' });
+    }
+
+    const row = await db.prepare(`
+      INSERT INTO documents (request_id, document_type, document_number, client_name, company_name, email, issue_month, total_amount, notes, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      RETURNING *
+    `).run(requestId, normalizedType, String(document_number).trim(), client_name || null, company_name || null, email || null, normalizedMonth, amount, notes || null, req.user.id);
+
+    const doc = row.lastInsertRowid ? await db.prepare('SELECT * FROM documents WHERE id = ?').get(row.lastInsertRowid) : null;
+    res.status(201).json({ message: 'تم حفظ المستند بنجاح', document: doc ? { ...doc, total_amount: Number(doc.total_amount || 0), url: toDocumentUrl(doc.file_path) } : null });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'خطأ في حفظ المستند' });
+  }
+});
+
+router.get('/documents/:id', adminMiddleware, async (req, res) => {
+  try {
+    const document = await db.prepare(`
+      SELECT d.*, r.id as request_id_real, r.company_name as request_company_name, r.owner_name as request_owner_name,
+             r.funding_type, r.entity_type, r.funding_amount, r.operating_expenses, r.net_revenue, r.commission_amount,
+             u.name as created_by_name, u.email as user_email, u.phone as user_phone
+      FROM documents d
+      LEFT JOIN requests r ON r.id = d.request_id
+      LEFT JOIN users u ON u.id = d.created_by
+      WHERE d.id = ?
+    `).get(req.params.id);
+
+    if (!document) return res.status(404).json({ error: 'المستند غير موجود' });
+
+    const request = document.request_id_real ? await db.prepare('SELECT * FROM requests WHERE id = ?').get(document.request_id_real) : null;
+    const payload = {
+      document: {
+        ...document,
+        total_amount: Number(document.total_amount || 0),
+        url: toDocumentUrl(document.file_path),
+        sent_via_email: Boolean(document.sent_via_email),
+      },
+      request: request ? parseRequestRow(request) : null,
+    };
+    res.json(payload);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'خطأ في استرجاع تفاصيل المستند' });
+  }
+});
+
+router.get('/documents/:id/template', adminMiddleware, async (req, res) => {
+  try {
+    const document = await db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
+    if (!document) return res.status(404).send('المستند غير موجود');
+    const request = document.request_id ? await db.prepare('SELECT * FROM requests WHERE id = ?').get(document.request_id) : null;
+    const html = renderDocumentTemplate(document, request || {});
+    res.type('html').send(html);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('خطأ في إنشاء قالب المستند');
+  }
+});
+
+router.post('/documents/:id/send-email', adminMiddleware, async (req, res) => {
+  try {
+    const doc = await db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'المستند غير موجود' });
+    if (!doc.email || !doc.email.trim()) return res.status(400).json({ error: 'لا يوجد بريد إلكتروني لهذا المستند' });
+
+    const transporterConfig = {
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT || 587),
+      secure: String(process.env.SMTP_SECURE || 'false').toLowerCase() === 'true',
+      auth: process.env.SMTP_USER && process.env.SMTP_PASS ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
+    };
+
+    let result = 'simulated';
+    if (transporterConfig.host && transporterConfig.auth) {
+      const nodemailer = require('nodemailer');
+      const transporter = nodemailer.createTransport(transporterConfig);
+      const subject = `مستند ${doc.document_type || 'invoice'} - ${doc.document_number || doc.id}`;
+      await transporter.sendMail({
+        from: process.env.SMTP_FROM || process.env.SMTP_USER,
+        to: doc.email,
+        subject,
+        text: `تم إرسال المستند ${doc.document_number || doc.id} بنجاح.\nالعميل: ${doc.client_name || 'غير محدد'}\nالمبلغ: ${Number(doc.total_amount || 0)}\n`,
+      });
+      result = 'sent';
+    }
+
+    await db.prepare('UPDATE documents SET sent_via_email = 1, updated_at = NOW() WHERE id = ?').run(req.params.id);
+    await db.prepare('INSERT INTO document_email_logs (document_id, email, subject, result) VALUES (?, ?, ?, ?)')
+      .run(req.params.id, doc.email, `مستند ${doc.document_number || doc.id}`, result);
+
+    const updatedDoc = await db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
+    res.json({ message: 'تم تسجيل إرسال البريد بنجاح', document: { ...updatedDoc, sent_via_email: Boolean(updatedDoc.sent_via_email) } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'خطأ في إرسال البريد' });
   }
 });
 

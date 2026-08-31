@@ -11,6 +11,7 @@ const navItems = [
   { path: '/requests',        label: 'الطلبات',       icon: FileText,        roles: ['admin', 'employee', 'partner'] },
   { path: '/commissions',     label: 'عمولاتي',        icon: Award,           roles: ['partner'] },
   { path: '/accounting',      label: 'المحاسبة',      icon: Calculator,      roles: ['admin', 'employee', 'partner'] },
+  { path: '/documents',       label: 'المستندات',      icon: FileText,        roles: ['admin'] },
   { path: '/attendance',      label: 'الحضور',         icon: Clock,           roles: ['employee'] },
   { path: '/attendance-admin',label: 'سجل الحضور',   icon: CalendarDays,    roles: ['admin'], anyPermissions: ['view_attendance_admin', 'delete_attendance_records'] },
   { path: '/performance',     label: 'تحليل الأداء',  icon: TrendingUp,      roles: ['admin'], permission: 'view_performance' },
