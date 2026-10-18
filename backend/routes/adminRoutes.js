@@ -388,6 +388,16 @@ router.get('/requests/archive', hasPermission('view_all_requests'), async (req, 
     }
 
     if (entries.length === 0) {
+      const fileGroups = [documents, bankStatements, accountStatements, taxDocuments, contracts];
+      const fileRecords = fileGroups.flat();
+      console.warn('أرشيف الطلبات فارغ بعد فحص الملفات:', {
+        requests: requests.length,
+        fileRecords: fileRecords.length,
+        matchedRequestFiles: fileRecords.filter((file) => requestFolders.has(file.request_id)).length,
+        existingRequestFiles: fileRecords.filter((file) => file.file_path && fs.existsSync(file.file_path)).length,
+        completeFiles: requests.filter((request) => request.complete_file_path).length,
+        existingCompleteFiles: requests.filter((request) => request.complete_file_path && fs.existsSync(request.complete_file_path)).length,
+      });
       return res.status(404).json({ error: 'لا توجد ملفات مرفوعة لأرشفتها' });
     }
 
