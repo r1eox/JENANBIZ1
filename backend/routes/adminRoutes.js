@@ -332,6 +332,18 @@ router.get('/requests', hasPermission('view_all_requests'), async (req, res) => 
   }
 });
 
+function toArchivePublicPath(filePath) {
+  const normalizedPath = String(filePath || '').replace(/\\/g, '/');
+  const uploadsIndex = normalizedPath.lastIndexOf('/uploads/');
+  if (uploadsIndex < 0) return null;
+
+  const relativePath = normalizedPath.slice(uploadsIndex + 9);
+  const segments = relativePath.split('/');
+  if (!relativePath || segments.some((segment) => !segment || segment === '.' || segment === '..')) return null;
+
+  return `/uploads/${segments.map(encodeURIComponent).join('/')}`;
+}
+
 router.get('/requests/archive', hasPermission('view_all_requests'), async (req, res) => {
   try {
     const requests = await db.prepare(`
@@ -357,7 +369,7 @@ router.get('/requests/archive', hasPermission('view_all_requests'), async (req, 
     const addFiles = (files, category) => {
       for (const file of files) {
         const requestFolder = requestFolders.get(file.request_id);
-        if (!requestFolder || !file.file_path || !fs.existsSync(file.file_path)) continue;
+        if (!requestFolder || !file.file_path) continue;
         const name = sanitizeArchiveName(file.file_name || file.document_name || path.basename(file.file_path));
         entries.push({
           path: file.file_path,
@@ -376,7 +388,7 @@ router.get('/requests/archive', hasPermission('view_all_requests'), async (req, 
     })), 'العقود');
 
     for (const request of requests) {
-      if (!request.complete_file_path || !fs.existsSync(request.complete_file_path)) continue;
+      if (!request.complete_file_path) continue;
       const requestFolder = requestFolders.get(request.id);
       const fileName = sanitizeArchiveName(
         request.complete_file_name || path.basename(request.complete_file_path)
@@ -412,7 +424,23 @@ router.get('/requests/archive', hasPermission('view_all_requests'), async (req, 
     });
     res.attachment('request-documents.zip');
     archive.pipe(res);
-    for (const entry of entries) archive.file(entry.path, { name: entry.name });
+    for (const entry of entries) {
+      if (fs.existsSync(entry.path)) {
+        archive.file(entry.path, { name: entry.name });
+        continue;
+      }
+
+      const publicPath = toArchivePublicPath(entry.path);
+      if (!publicPath || !process.env.RENDER_EXTERNAL_URL) {
+        throw new Error('تعذر تحديد مصدر ملف الأرشيف');
+      }
+      const fileResponse = await fetch(new URL(publicPath, process.env.RENDER_EXTERNAL_URL));
+      if (!fileResponse.ok || !fileResponse.body) {
+        throw new Error(`تعذر جلب ملف الأرشيف من التخزين: HTTP ${fileResponse.status}`);
+      }
+      const { Readable } = require('node:stream');
+      archive.append(Readable.fromWeb(fileResponse.body), { name: entry.name });
+    }
     await archive.finalize();
   } catch (err) {
     console.error('فشل تحميل أرشيف مستندات الموظفين:', err);
