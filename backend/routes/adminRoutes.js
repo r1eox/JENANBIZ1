@@ -332,6 +332,86 @@ router.get('/requests', hasPermission('view_all_requests'), async (req, res) => 
   }
 });
 
+router.get('/requests/archive', hasPermission('view_all_requests'), async (req, res) => {
+  try {
+    const requests = await db.prepare(`
+      SELECT r.id, r.user_id, r.company_name, r.complete_file_path, r.complete_file_name,
+        u.name as user_name
+      FROM requests r
+      JOIN users u ON u.id = r.user_id
+      WHERE u.role = 'employee'
+      ORDER BY u.name, r.id
+    `).all();
+    const requestFolders = new Map(requests.map((request) => [
+      request.id,
+      `${sanitizeArchiveName(request.user_name || `موظف-${request.user_id}`)}-${request.user_id}/طلب-${request.id}-${sanitizeArchiveName(request.company_name)}`,
+    ]));
+    const [documents, bankStatements, accountStatements, taxDocuments, contracts] = await Promise.all([
+      db.prepare('SELECT id, request_id, document_name, file_name, file_path FROM request_documents WHERE file_path IS NOT NULL').all(),
+      db.prepare('SELECT id, request_id, file_name, file_path FROM bank_statements WHERE file_path IS NOT NULL').all(),
+      db.prepare('SELECT id, request_id, file_name, file_path FROM account_statements WHERE file_path IS NOT NULL').all(),
+      db.prepare('SELECT id, request_id, file_name, file_path FROM tax_documents WHERE file_path IS NOT NULL').all(),
+      db.prepare('SELECT id, request_id, contract_type, file_name, file_path FROM contracts WHERE file_path IS NOT NULL').all(),
+    ]);
+
+    const entries = [];
+    const addFiles = (files, category) => {
+      for (const file of files) {
+        const requestFolder = requestFolders.get(file.request_id);
+        if (!requestFolder || !file.file_path || !fs.existsSync(file.file_path)) continue;
+        const name = sanitizeArchiveName(file.file_name || file.document_name || path.basename(file.file_path));
+        entries.push({
+          path: file.file_path,
+          name: `${requestFolder}/${category}/${file.id}-${name}`,
+        });
+      }
+    };
+
+    addFiles(documents, 'المستندات');
+    addFiles(bankStatements, 'الكشوفات البنكية');
+    addFiles(accountStatements, 'القوائم الحسابية');
+    addFiles(taxDocuments, 'الوثائق الضريبية');
+    addFiles(contracts.map((contract) => ({
+      ...contract,
+      file_name: contract.file_name || `${contract.contract_type || 'عقد'}-${contract.id}`,
+    })), 'العقود');
+
+    for (const request of requests) {
+      if (!request.complete_file_path || !fs.existsSync(request.complete_file_path)) continue;
+      const requestFolder = requestFolders.get(request.id);
+      const fileName = sanitizeArchiveName(
+        request.complete_file_name || path.basename(request.complete_file_path)
+      );
+      entries.push({
+        path: request.complete_file_path,
+        name: `${requestFolder}/الملف الكامل/${fileName}`,
+      });
+    }
+
+    if (entries.length === 0) {
+      return res.status(404).json({ error: 'لا توجد ملفات مرفوعة لأرشفتها' });
+    }
+
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    archive.on('error', (err) => {
+      console.error('فشل إنشاء أرشيف مستندات الموظفين:', err);
+      if (!res.headersSent) res.status(500).json({ error: 'تعذر إنشاء أرشيف المستندات' });
+      else res.destroy(err);
+    });
+    res.on('close', () => {
+      if (!res.writableEnded) archive.abort();
+    });
+    res.attachment('employee-documents.zip');
+    archive.pipe(res);
+    for (const entry of entries) archive.file(entry.path, { name: entry.name });
+    await archive.finalize();
+  } catch (err) {
+    console.error('فشل تحميل أرشيف مستندات الموظفين:', err);
+    if (!res.headersSent) res.status(500).json({ error: 'تعذر تحميل أرشيف المستندات' });
+    else res.destroy(err);
+  }
+});
+
 router.get('/requests/:id', hasPermission('view_all_requests'), async (req, res) => {
   try {
     const request = await db.prepare(`
@@ -1424,8 +1504,8 @@ router.get('/performance', hasPermission('view_performance'), async (req, res) =
     const users = await db.prepare(`SELECT id, name, role, partner_type, phone, status, created_at
       FROM users WHERE role IN ('employee','partner') AND status='approved' ORDER BY role, name`).all();
     const result = await Promise.all(users.map(async (u) => {
-      const allReqs = await db.prepare(`SELECT id, status, created_at, updated_at, company_name, funding_type
-        FROM requests WHERE user_id=? ${dateFilter}`).all(u.id, ...filterParams);
+      const allReqs = await db.prepare(`SELECT r.id, r.status, r.created_at, r.updated_at, r.company_name, r.funding_type
+        FROM requests r WHERE r.user_id=? ${dateFilter}`).all(u.id, ...filterParams);
       const statusGroups = {
         draft:       allReqs.filter(r => ['draft','bank_uploaded'].includes(r.status)).length,
         in_progress: allReqs.filter(r => ['analyzing','analyzed','docs_pending','docs_ready','contract_submitted','forms_ready','forms_sent','file_submitted','missing_submitted','contract_received'].includes(r.status)).length,

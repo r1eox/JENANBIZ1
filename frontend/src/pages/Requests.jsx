@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import {
   Search, Plus, Eye, Send, ChevronDown, X, Phone, Building2,
-  User, FileText, Edit2, Trash2, AlertTriangle, Upload, Briefcase, Landmark, Wallet, Home, Paperclip
+  User, FileText, Edit2, Trash2, AlertTriangle, Upload, Briefcase, Landmark, Wallet, Home, Paperclip, Archive
 } from 'lucide-react';
 
 const STATUS_MAP = {
@@ -845,6 +845,7 @@ export default function Requests() {
   const [requests, setRequests] = useState([]);
   const [selectedRequestIds, setSelectedRequestIds] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [downloadingArchive, setDownloadingArchive] = useState(false);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
 
@@ -1379,6 +1380,30 @@ export default function Requests() {
     load();
   };
 
+  const downloadEmployeeArchive = async () => {
+    setDownloadingArchive(true);
+    try {
+      const response = await authFetch('/api/admin/requests/archive');
+      if (!response.ok) {
+        const result = await response.json();
+        throw new Error(result.error || 'تعذر إنشاء ملف الموظفين المضغوط');
+      }
+      const archiveUrl = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = archiveUrl;
+      link.download = 'employee-documents.zip';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(archiveUrl), 1000);
+    } catch (err) {
+      console.error('فشل تنزيل ملفات الموظفين:', err);
+      alert(err.message || 'تعذر تنزيل ملفات الموظفين');
+    } finally {
+      setDownloadingArchive(false);
+    }
+  };
+
   const myMissingCount = !isAdmin
     ? requests.filter(r => r.status === 'missing').length
     : 0;
@@ -1404,6 +1429,17 @@ export default function Requests() {
           <h1 className="text-2xl font-black text-gray-900">الطلبات</h1>
           <p className="text-gray-400 text-sm mt-0.5">{requests.length} طلب إجمالاً</p>
         </div>
+        {canViewAllRequests && (
+          <button
+            type="button"
+            onClick={downloadEmployeeArchive}
+            disabled={downloadingArchive}
+            className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
+          >
+            <Archive size={16} />
+            {downloadingArchive ? 'جارٍ ضغط الملفات...' : 'تنزيل ملفات الموظفين مضغوطة'}
+          </button>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-3 mb-5">

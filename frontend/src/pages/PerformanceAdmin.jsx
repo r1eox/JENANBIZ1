@@ -82,13 +82,32 @@ function duration(ci, co) {
 function DetailDrawer({ userId, month, authFetch, onClose }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [tab, setTab] = useState('requests'); // 'requests' | 'attendance' | 'chart'
 
   useEffect(() => {
+    let active = true;
     const p = month ? `?month=${month}` : '';
-    authFetch(`/api/admin/performance/${userId}${p}`)
-      .then(r => r.json())
-      .then(d => { setData(d); setLoading(false); });
+    const load = async () => {
+      setLoading(true);
+      setError('');
+      try {
+        const response = await authFetch(`/api/admin/performance/${userId}${p}`);
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'تعذر تحميل تفاصيل الأداء');
+        if (active) setData(result);
+      } catch (err) {
+        console.error('فشل تحميل تفاصيل الأداء:', err);
+        if (active) {
+          setData(null);
+          setError(err.message || 'تعذر تحميل تفاصيل الأداء');
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    load();
+    return () => { active = false; };
   }, [userId, month, authFetch]);
 
   if (loading) return (
@@ -100,6 +119,15 @@ function DetailDrawer({ userId, month, authFetch, onClose }) {
     </div>
   );
 
+  if (error) return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      <div className="fixed inset-0 bg-black/30" onClick={onClose} />
+      <div className="relative flex h-full w-full max-w-2xl flex-col items-center justify-center bg-white p-6 text-center shadow-2xl">
+        <p className="text-sm font-semibold text-red-600" role="alert">{error}</p>
+        <button onClick={onClose} className="mt-4 rounded-xl bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-700">إغلاق</button>
+      </div>
+    </div>
+  );
   if (!data) return null;
   const { user, requests, monthly, attendance } = data;
 
@@ -285,6 +313,7 @@ export default function PerformanceAdmin() {
   const [data, setData]           = useState([]);
   const [targetsData, setTargets] = useState([]);
   const [loading, setLoading]     = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [targLoading, setTargLoad]= useState(false);
   const [month, setMonth]         = useState(new Date().toISOString().slice(0, 7));
   const [selectedId, setSelectedId] = useState(null);
@@ -296,9 +325,17 @@ export default function PerformanceAdmin() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError('');
     try {
-      const d = await authFetch(`/api/admin/performance?month=${month}`).then(r => r.json());
-      setData(Array.isArray(d) ? d : []);
+      const response = await authFetch(`/api/admin/performance?month=${month}`);
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'تعذر تحميل بيانات الأداء');
+      if (!Array.isArray(result)) throw new Error('استجابة بيانات الأداء غير صالحة');
+      setData(result);
+    } catch (err) {
+      console.error('فشل تحميل بيانات الأداء:', err);
+      setData([]);
+      setLoadError(err.message || 'تعذر تحميل بيانات الأداء');
     } finally {
       setLoading(false);
     }
@@ -436,6 +473,11 @@ export default function PerformanceAdmin() {
         {loading ? (
           <div className="flex items-center justify-center h-48">
             <Loader className="animate-spin text-blue-500" size={28} />
+          </div>
+        ) : loadError ? (
+          <div className="py-12 text-center" role="alert">
+            <p className="text-sm font-semibold text-red-600">{loadError}</p>
+            <button onClick={load} className="mt-3 rounded-xl bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-100">إعادة المحاولة</button>
           </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-16 text-gray-400">
