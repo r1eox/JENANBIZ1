@@ -117,7 +117,7 @@ function toPublicUploadUrl(filePath = '') {
 async function createZipArchive(zipPath, entries) {
   await new Promise((resolve, reject) => {
     const output = fs.createWriteStream(zipPath);
-    const archive = archiver('zip', { zlib: { level: 9 } });
+    const archive = new archiver.ZipArchive({ zlib: { level: 9 } });
 
     output.on('close', resolve);
     output.on('error', reject);

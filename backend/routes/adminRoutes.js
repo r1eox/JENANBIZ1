@@ -73,7 +73,7 @@ function toDocumentUrl(filePath = '') {
 async function createZipArchive(zipPath, entries) {
   await new Promise((resolve, reject) => {
     const output = fs.createWriteStream(zipPath);
-    const archive = archiver('zip', { zlib: { level: 9 } });
+    const archive = new archiver.ZipArchive({ zlib: { level: 9 } });
 
     output.on('close', resolve);
     output.on('error', reject);
@@ -413,7 +413,7 @@ router.get('/requests/archive', hasPermission('view_all_requests'), async (req, 
       return res.status(404).json({ error: 'لا توجد ملفات مرفوعة لأرشفتها' });
     }
 
-    const archive = archiver('zip', { zlib: { level: 9 } });
+    const archive = new archiver.ZipArchive({ zlib: { level: 9 } });
     archive.on('error', (err) => {
       console.error('فشل إنشاء أرشيف مستندات الموظفين:', err);
       if (!res.headersSent) res.status(500).json({ error: 'تعذر إنشاء أرشيف المستندات' });
