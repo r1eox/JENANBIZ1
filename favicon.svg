@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <style>
+      .logo-dark { fill: #1a1a2e; font-family: 'Georgia', serif; }
+      .logo-blue { fill: #4a6cf5; font-family: 'Georgia', serif; }
+    </style>
+  </defs>
+  <text x="10" y="38" class="logo-dark" font-size="38" font-weight="700" font-style="italic">J</text>
+  <text x="22" y="56" class="logo-blue" font-size="18" font-weight="700" font-style="italic">BIZ</text>
+</svg>

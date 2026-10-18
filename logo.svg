@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200">
+  <defs>
+    <style>
+      .logo-dark { fill: #1a1a2e; font-family: 'Georgia', serif; }
+      .logo-blue { fill: #4a6cf5; font-family: 'Georgia', serif; }
+    </style>
+  </defs>
+  <!-- J with curved tail -->
+  <text x="20" y="130" class="logo-dark" font-size="120" font-weight="bold" font-style="italic">J</text>
+  <!-- enan -->
+  <text x="80" y="120" class="logo-dark" font-size="62" font-weight="bold">enan</text>
+  <!-- BIZ -->
+  <text x="115" y="175" class="logo-blue" font-size="55" font-weight="bold" font-style="italic">BIZ</text>
+</svg>
