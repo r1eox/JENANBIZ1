@@ -1391,7 +1391,7 @@ export default function Requests() {
       const archiveUrl = URL.createObjectURL(await response.blob());
       const link = document.createElement('a');
       link.href = archiveUrl;
-      link.download = 'employee-documents.zip';
+      link.download = 'request-documents.zip';
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -1437,7 +1437,7 @@ export default function Requests() {
             className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
           >
             <Archive size={16} />
-            {downloadingArchive ? 'جارٍ ضغط الملفات...' : 'تنزيل ملفات الموظفين مضغوطة'}
+            {downloadingArchive ? 'جارٍ ضغط الملفات...' : 'تنزيل ملفات الطلبات مضغوطة'}
           </button>
         )}
       </div>

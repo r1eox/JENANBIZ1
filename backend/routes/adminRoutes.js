@@ -339,7 +339,6 @@ router.get('/requests/archive', hasPermission('view_all_requests'), async (req, 
         u.name as user_name
       FROM requests r
       JOIN users u ON u.id = r.user_id
-      WHERE u.role = 'employee'
       ORDER BY u.name, r.id
     `).all();
     const requestFolders = new Map(requests.map((request) => [
@@ -401,7 +400,7 @@ router.get('/requests/archive', hasPermission('view_all_requests'), async (req, 
     res.on('close', () => {
       if (!res.writableEnded) archive.abort();
     });
-    res.attachment('employee-documents.zip');
+    res.attachment('request-documents.zip');
     archive.pipe(res);
     for (const entry of entries) archive.file(entry.path, { name: entry.name });
     await archive.finalize();
